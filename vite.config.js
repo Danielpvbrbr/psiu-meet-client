@@ -1,17 +1,22 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { resolve } from 'path';
+import { defineConfig } from 'vite'
+import react, { reactCompilerPreset } from '@vitejs/plugin-react'
+import babel from '@rolldown/plugin-babel'
+import { resolve } from 'path'
 
+// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    babel({ presets: [reactCompilerPreset()] })
+  ],
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/lib/index.js'), // Onde a biblioteca começa
-      name: 'PsiuFlashReact',
-      fileName: 'psiu-flash-react',
+      entry: resolve(__dirname, 'src/lib/index.js'), // Onde a sua biblioteca começa
+      name: 'PsiuMeetClient',
+      fileName: 'psiu-meet-client',
     },
     rollupOptions: {
-      // Garante que o React não vai ser empacotado junto, pesando a biblioteca
+      // Garante que essas bibliotecas não serão embutidas, deixando seu pacote leve
       external: ['react', 'react-dom', 'socket.io-client'],
       output: {
         globals: {
@@ -22,4 +27,4 @@ export default defineConfig({
       },
     },
   },
-});
+})

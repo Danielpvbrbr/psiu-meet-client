@@ -4,7 +4,20 @@ import { Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, GripVertical, User
 import { PsiuFlashProvider, usePsiuFlash } from './lib/PsiuFlashContext';
 import { LocalVideo, RemoteVideo } from './lib/VideoComponents';
 
-const SERVER_URL = 'http://localhost:3333';
+const SERVER_URL  = 'http://localhost:3333';
+const SESSION_KEY = 'psiu_session';
+
+const formatTime = (ms) => {
+  if (ms === null) return '--:--';
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+};
+
+const readSession = () => {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY)) || {}; }
+  catch { return {}; }
+};
 
 // ============================================================================
 // PAINEL DE TESTE
@@ -35,8 +48,10 @@ function TelaDeMock({ onInjetarJson, salaAtivaId }) {
     }
   };
 
-  const cardClass = (color) =>
-    `flex-1 bg-slate-900 border border-${color}-500/30 hover:border-${color}-500/50 p-6 rounded-3xl shadow-xl flex flex-col transition-all`;
+  const cards = [
+    { label: 'Criar Sala (Professor)', icon: <GraduationCap className="text-blue-500" size={28} />,   color: 'blue',    json: jsonProfStr, setJson: setJsonProfStr, btnText: 'Conectar Professor' },
+    { label: 'Acessar Sala (Aluno)',   icon: <User          className="text-emerald-500" size={28} />, color: 'emerald', json: jsonAlunoStr, setJson: setJsonAlunoStr, btnText: 'Conectar Aluno'    },
+  ];
 
   return (
     <div className="flex flex-col items-center justify-center w-full min-h-screen bg-slate-950 text-slate-200 p-6 overflow-auto">
@@ -50,11 +65,8 @@ function TelaDeMock({ onInjetarJson, salaAtivaId }) {
       )}
 
       <div className="flex gap-8 w-full max-w-5xl">
-        {[
-          { label: 'Criar Sala (Professor)', icon: <GraduationCap className="text-blue-500" size={28} />, color: 'blue', json: jsonProfStr, setJson: setJsonProfStr, btnText: 'Conectar Professor' },
-          { label: 'Acessar Sala (Aluno)',   icon: <User className="text-emerald-500" size={28} />,       color: 'emerald', json: jsonAlunoStr, setJson: setJsonAlunoStr, btnText: 'Conectar Aluno' },
-        ].map(({ label, icon, color, json, setJson, btnText }) => (
-          <div key={label} className={cardClass(color)}>
+        {cards.map(({ label, icon, color, json, setJson, btnText }) => (
+          <div key={label} className={`flex-1 bg-slate-900 border border-${color}-500/30 hover:border-${color}-500/50 p-6 rounded-3xl shadow-xl flex flex-col transition-all`}>
             <div className="flex items-center gap-3 mb-4">
               {icon}
               <h2 className="text-xl font-bold text-white">{label}</h2>
@@ -85,9 +97,9 @@ function TelaDeMock({ onInjetarJson, salaAtivaId }) {
 // SALA DE VÍDEO
 // ============================================================================
 function SalaDeVideo({ payload, onSair, salaId, setSalaId }) {
-  const { startCamera, joinRoom, toggleMic, toggleCam, isMicOn, isCamOn } = usePsiuFlash();
+  const { startSession, leaveRoom, toggleMic, toggleCam, isMicOn, isCamOn, status, error, remainingMs } = usePsiuFlash();
   const janelaVideoRef = useRef(null);
-  const iniciouRef = useRef(false);
+  const iniciouRef     = useRef(false);
 
   useEffect(() => {
     if (iniciouRef.current) return;
@@ -95,11 +107,9 @@ function SalaDeVideo({ payload, onSair, salaId, setSalaId }) {
 
     const conectar = async () => {
       try {
-        await startCamera();
-
         let roomId = payload.chave || salaId;
 
-        if (payload.papel === 'professor' && !payload.chave) {
+        if (payload.papel === 'professor' && !payload.chave && !salaId) {
           const res = await fetch(`${SERVER_URL}/api/rooms`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -112,7 +122,7 @@ function SalaDeVideo({ payload, onSair, salaId, setSalaId }) {
 
         if (!roomId) { alert('Erro: Nenhuma chave de sala!'); return onSair(); }
 
-        setTimeout(() => joinRoom(roomId, payload.nome), 800);
+        await startSession(roomId, payload.nome);
       } catch (err) {
         console.error('Erro ao conectar:', err);
       }
@@ -121,59 +131,67 @@ function SalaDeVideo({ payload, onSair, salaId, setSalaId }) {
     conectar();
   }, []);
 
-  const isProfessor = payload.papel === 'professor';
+  const isProfessor  = payload.papel === 'professor';
+  const statusLabel  = { connecting: 'Conectando...', reconnecting: 'Reconectando...', error }[status] ?? null;
+  const statusColor  = status === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400';
+  const timerColor   = remainingMs !== null && remainingMs < 300000 ? 'bg-red-500/20 text-red-400' : 'bg-slate-700 text-slate-300';
+
+  const handleSair = () => { leaveRoom(); onSair(); };
 
   return (
-    <div className="relative w-full h-screen bg-[#0f1115] overflow-hidden text-white">
+    <div className="relative w-full h-screen bg-slate-950 overflow-hidden text-white">
 
       {/* Header */}
-      <div className="absolute top-6 left-6 z-30 flex items-center gap-3 bg-black/40 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/5 shadow-lg">
-        <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${isProfessor ? 'bg-blue-500' : 'bg-emerald-500'}`} />
-        <span className="text-sm font-medium text-slate-200 tracking-wide">
+      <div className="absolute top-6 left-6 z-30 flex items-center gap-3 bg-slate-900/80 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/10 shadow-lg">
+        <span className="text-xs font-mono text-slate-300">
           Sala: {payload.chave || salaId || 'Conectando...'}
         </span>
-        <span className="text-slate-500 mx-1">|</span>
-        <span className="text-sm font-semibold text-slate-300 capitalize">{payload.nome}</span>
+        <span className={`px-2 py-0.5 text-[10px] uppercase font-bold rounded ${isProfessor ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+          {payload.papel}
+        </span>
+        {statusLabel && (
+          <span className={`px-2 py-0.5 text-[10px] rounded font-medium ${statusColor}`}>
+            {statusLabel}
+          </span>
+        )}
+        <span className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded ${timerColor}`}>
+          ⏱ {formatTime(remainingMs)}
+        </span>
       </div>
 
       {/* Vídeo remoto (fundo) */}
-      <div className="absolute inset-0 z-0 bg-[#0f1115]">
+      <div className="absolute inset-0 z-0">
         <RemoteVideo className="w-full h-full object-cover" fallbackText="" />
       </div>
 
       {/* PiP arrastável */}
-      <Draggable nodeRef={janelaVideoRef} bounds="parent" defaultPosition={{ x: window.innerWidth - 320, y: 24 }}>
-        <div
-          ref={janelaVideoRef}
-          className="absolute z-20 w-64 aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-slate-700/50 group cursor-grab active:cursor-grabbing hover:border-blue-500/50 transition-colors"
-        >
-          <div className="absolute top-0 inset-x-0 h-6 bg-gradient-to-b from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex justify-center items-start pt-1 z-30">
-            <GripVertical size={14} className="text-white/60 rotate-90" />
+      <Draggable nodeRef={janelaVideoRef} bounds="parent" defaultPosition={{ x: 0, y: 0 }}>
+        <div ref={janelaVideoRef} className="absolute top-6 right-6 z-20 w-72 aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/5 group cursor-grab active:cursor-grabbing">
+          <div className="absolute inset-y-0 left-0 w-6 flex items-center justify-center bg-slate-800/80 opacity-0 group-hover:opacity-100 transition-opacity">
+            <GripVertical size={16} className="text-white/40" />
           </div>
           <LocalVideo className="w-full h-full object-cover scale-x-[-1]" />
-          <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 backdrop-blur-md rounded-md text-[11px] font-medium z-30">
-            Você
+          <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/50 backdrop-blur-sm rounded text-xs text-white/70">
+            {payload.nome} (Você)
           </div>
         </div>
       </Draggable>
 
       {/* Controles */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-[#1c1f26]/90 backdrop-blur-lg px-6 py-4 rounded-2xl shadow-2xl border border-white/5">
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-slate-900/80 backdrop-blur-lg px-8 py-5 rounded-full shadow-2xl border border-white/10">
         <ControlBtn onClick={toggleMic} active={isMicOn}>
-          {isMicOn ? <Mic size={22} /> : <MicOff size={22} />}
+          {isMicOn ? <Mic size={26} /> : <MicOff size={26} />}
         </ControlBtn>
         <ControlBtn onClick={toggleCam} active={isCamOn}>
-          {isCamOn ? <VideoIcon size={22} /> : <VideoOff size={22} />}
+          {isCamOn ? <VideoIcon size={26} /> : <VideoOff size={26} />}
         </ControlBtn>
-
-        <div className="w-px h-8 bg-slate-700 mx-2" />
-
+        <div className="w-px h-10 bg-white/10 mx-2" />
         <button
-          onClick={onSair}
-          className="flex items-center gap-2 px-6 py-3 rounded-xl bg-red-500 hover:bg-red-600 active:bg-red-700 font-medium shadow-lg shadow-red-500/20 transition-all active:scale-95"
+          onClick={handleSair}
+          className="flex items-center gap-3 px-8 py-4 rounded-full bg-red-500 hover:bg-red-600 text-white font-semibold text-lg shadow-lg transition-all hover:scale-105"
         >
-          <PhoneOff size={20} />
-          Encerrar
+          <PhoneOff size={24} />
+          Sair
         </button>
       </div>
     </div>
@@ -195,8 +213,25 @@ function ControlBtn({ onClick, active, children }) {
 // RAIZ
 // ============================================================================
 export default function App() {
-  const [payload, setPayload] = useState(null);
-  const [salaAtivaId, setSalaAtivaId] = useState(null);
+  const [payload,     setPayload]     = useState(() => readSession().payload     || null);
+  const [salaAtivaId, setSalaAtivaId] = useState(() => readSession().salaAtivaId || null);
+
+  useEffect(() => {
+    if (!payload) return;
+    const roomId = payload.chave || salaAtivaId;
+    if (roomId) localStorage.setItem(SESSION_KEY, JSON.stringify({ payload, salaAtivaId: roomId }));
+  }, [payload, salaAtivaId]);
+
+  const handleSair = () => {
+    localStorage.removeItem(SESSION_KEY);
+    setPayload(null);
+    setSalaAtivaId(null);
+  };
+
+  const handleSetSalaId = (id) => {
+    setSalaAtivaId(id);
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ payload, salaAtivaId: id }));
+  };
 
   return (
     <div className="fixed inset-0 w-screen h-screen bg-slate-950">
@@ -207,8 +242,8 @@ export default function App() {
           <SalaDeVideo
             payload={payload}
             salaId={salaAtivaId}
-            setSalaId={setSalaAtivaId}
-            onSair={() => { setPayload(null); window.location.reload(); }}
+            setSalaId={handleSetSalaId}
+            onSair={handleSair}
           />
         </PsiuFlashProvider>
       )}

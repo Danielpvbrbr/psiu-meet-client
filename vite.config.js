@@ -1,30 +1,29 @@
 import { defineConfig } from 'vite'
-import react, { reactCompilerPreset } from '@vitejs/plugin-react'
-import babel from '@rolldown/plugin-babel'
+import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    react(),
-    babel({ presets: [reactCompilerPreset()] })
+    react()
   ],
+
   build: {
+    target: 'esnext',
+
     lib: {
-      entry: resolve(__dirname, 'src/lib/index.js'), // Onde a sua biblioteca começa
+      entry: resolve(__dirname, 'src/lib/index.js'),
       name: 'PsiuMeetClient',
       fileName: 'psiu-meet-client',
+      formats: ['es']
     },
+
     rollupOptions: {
-      // Garante que essas bibliotecas não serão embutidas, deixando seu pacote leve
-      external: ['react', 'react-dom', 'socket.io-client'],
+      // 🔥 O Escudo Definitivo: Impede o Vite de embutir o motor do React junto com o pacote
+      external: ['react', 'react-dom', 'react/jsx-runtime'],
+
       output: {
-        globals: {
-          react: 'React',
-          'react-dom': 'ReactDOM',
-          'socket.io-client': 'io'
-        },
-      },
-    },
-  },
+        exports: 'named'
+      }
+    }
+  }
 })

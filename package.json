@@ -3,30 +3,36 @@
   "version": "1.0.0",
   "description": "Componentes React para videochamadas WebRTC",
   "type": "module",
-  "main": "dist/psiu-meet-client.umd.cjs",
+
+  "main": "dist/psiu-meet-client.js",
   "module": "dist/psiu-meet-client.js",
+
   "exports": {
     ".": {
-      "import": "./dist/psiu-meet-client.js",
-      "require": "./dist/psiu-meet-client.umd.cjs"
+      "import": "./dist/psiu-meet-client.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+
+  "files": ["dist"],
+
+  "sideEffects": false,
+
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
+
   "dependencies": {
     "socket.io-client": "^4.8.1"
   },
+
   "peerDependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": ">=18",
+    "react-dom": ">=18"
   },
+
   "devDependencies": {
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

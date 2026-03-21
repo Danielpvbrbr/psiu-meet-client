@@ -1,18 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import Draggable from 'react-draggable';
 import { Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, GripVertical, User, GraduationCap, Code } from 'lucide-react';
-import { PsiuFlashProvider, usePsiuFlash } from './lib/PsiuFlashContext';
+import { PsiuFlashProvider, usePsiuFlash, formatTime } from './lib/PsiuFlashContext';
 import { LocalVideo, RemoteVideo } from './lib/VideoComponents';
 
 const SERVER_URL  = 'http://localhost:3333';
 const SESSION_KEY = 'psiu_session';
-
-const formatTime = (ms) => {
-  if (ms === null) return '--:--';
-  const m = Math.floor(ms / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-};
 
 const readSession = () => {
   try { return JSON.parse(localStorage.getItem(SESSION_KEY)) || {}; }
@@ -97,44 +90,31 @@ function TelaDeMock({ onInjetarJson, salaAtivaId }) {
 // SALA DE VÍDEO
 // ============================================================================
 function SalaDeVideo({ payload, onSair, salaId, setSalaId }) {
-  const { startSession, leaveRoom, toggleMic, toggleCam, isMicOn, isCamOn, status, error, remainingMs } = usePsiuFlash();
+  const { connect, leaveRoom, onExpired, toggleMic, toggleCam, isMicOn, isCamOn, status, error, remainingMs } = usePsiuFlash();
   const janelaVideoRef = useRef(null);
   const iniciouRef     = useRef(false);
+
+  useEffect(() => {
+    // Quando a sala expirar: limpa e volta pro painel
+    onExpired(() => {
+      leaveRoom();
+      onSair();
+    });
+  }, []);
 
   useEffect(() => {
     if (iniciouRef.current) return;
     iniciouRef.current = true;
 
-    const conectar = async () => {
-      try {
-        let roomId = payload.chave || salaId;
-
-        if (payload.papel === 'professor' && !payload.chave && !salaId) {
-          const res = await fetch(`${SERVER_URL}/api/rooms`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ maxParticipants: 2, durationMinutes: payload.tempo || 60 }),
-          });
-          const { roomId: id } = await res.json();
-          roomId = id;
-          setSalaId(roomId);
-        }
-
-        if (!roomId) { alert('Erro: Nenhuma chave de sala!'); return onSair(); }
-
-        await startSession(roomId, payload.nome);
-      } catch (err) {
-        console.error('Erro ao conectar:', err);
-      }
-    };
-
-    conectar();
+    connect({ ...payload, chave: payload.chave || salaId })
+      .then(({ roomId }) => { if (roomId) setSalaId(roomId); })
+      .catch(console.error);
   }, []);
 
-  const isProfessor  = payload.papel === 'professor';
-  const statusLabel  = { connecting: 'Conectando...', reconnecting: 'Reconectando...', error }[status] ?? null;
-  const statusColor  = status === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400';
-  const timerColor   = remainingMs !== null && remainingMs < 300000 ? 'bg-red-500/20 text-red-400' : 'bg-slate-700 text-slate-300';
+  const isProfessor = payload.papel === 'professor';
+  const statusLabel = { connecting: 'Conectando...', reconnecting: 'Reconectando...', error }[status] ?? null;
+  const statusColor = status === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400';
+  const timerColor  = remainingMs !== null && remainingMs < 300000 ? 'bg-red-500/20 text-red-400' : 'bg-slate-700 text-slate-300';
 
   const handleSair = () => { leaveRoom(); onSair(); };
 
@@ -238,7 +218,7 @@ export default function App() {
       {!payload ? (
         <TelaDeMock onInjetarJson={setPayload} salaAtivaId={salaAtivaId} />
       ) : (
-        <PsiuFlashProvider serverUrl={SERVER_URL}>
+        <PsiuFlashProvider serverUrl={SERVER_URL} vibes>
           <SalaDeVideo
             payload={payload}
             salaId={salaAtivaId}

@@ -2,6 +2,10 @@
 
 > A forma mais fácil de embutir videoconferências WebRTC em tempo real na sua aplicação React.
 
+[![npm version](https://img.shields.io/npm/v/psiu-meet-client)](https://www.npmjs.com/package/psiu-meet-client)
+[![license](https://img.shields.io/npm/l/psiu-meet-client)](https://github.com/Danielpvbrbr/psiu-meet-client/blob/main/LICENSE)
+[![GitHub](https://img.shields.io/badge/github-Danielpvbrbr-black?logo=github)](https://github.com/Danielpvbrbr/psiu-meet-client)
+
 Toda a complexidade de sinalização, túneis ICE/STUN e troca de pacotes via Socket.io fica escondida. Para você, apenas **Hooks limpos** e **Componentes de Vídeo modulares** — sem layouts engessados, sem iframes. 100% customizável.
 
 ---
@@ -16,6 +20,7 @@ Toda a complexidade de sinalização, túneis ICE/STUN e troca de pacotes via So
 - [Uso Avançado](#uso-avançado)
 - [Backend — Servidor de Sinalização](#backend--servidor-de-sinalização)
 - [Notas Importantes](#notas-importantes)
+- [Licença](#licença)
 
 ---
 
@@ -27,6 +32,9 @@ Toda a complexidade de sinalização, túneis ICE/STUN e troca de pacotes via So
 | **Hook headless** | `usePsiuFlash()` expõe todas as funções e o estado da chamada |
 | **Tailwind Ready** | Todos os componentes aceitam `className` e `style` nativamente |
 | **StrictMode Safe** | Compatível com React StrictMode — sem conexões duplicadas |
+| **Reconexão automática** | Se o socket cair, reconecta e re-entra na sala automaticamente |
+| **Timer por consumo** | O tempo só é consumido quando os dois participantes estão conectados |
+| **Vibes** | Feedback sonoro opcional via Web Audio API — sem arquivos externos |
 | **Topologia Mesh** | Suporte nativo a chamadas 1:1 e expansível para grupos pequenos |
 
 ---
@@ -39,8 +47,6 @@ npm install psiu-meet-client
 
 ### Dependências necessárias no seu projeto
 
-A biblioteca usa as seguintes dependências como `peerDependencies` — elas precisam estar instaladas no seu projeto:
-
 ```bash
 npm install react react-dom socket.io-client
 ```
@@ -50,8 +56,6 @@ npm install react react-dom socket.io-client
 ## Estrutura necessária
 
 Antes de usar a biblioteca, você precisa ter um **servidor de sinalização** rodando. Veja a seção [Backend](#backend--servidor-de-sinalização) para o código completo.
-
-O fluxo completo é:
 
 ```
 Seu App React
@@ -81,6 +85,12 @@ export default function App() {
 }
 ```
 
+Para ativar o feedback sonoro, passe a prop `vibes`:
+
+```jsx
+<PsiuFlashProvider serverUrl="http://localhost:3333" vibes>
+```
+
 > **Importante:** Monte o `PsiuFlashProvider` apenas na tela da videochamada, não no topo da aplicação inteira. Cada Provider abre uma conexão Socket independente.
 
 ---
@@ -88,44 +98,61 @@ export default function App() {
 ### 2. Monte sua Sala de Vídeo
 
 ```jsx
-import { LocalVideo, RemoteVideo, usePsiuFlash } from 'psiu-meet-client';
+import { LocalVideo, RemoteVideo, usePsiuFlash, formatTime } from 'psiu-meet-client';
 import { useEffect, useRef } from 'react';
 
 export default function SalaDeAula() {
-  const { startCamera, joinRoom, toggleMic, toggleCam, isMicOn, isCamOn } = usePsiuFlash();
+  const {
+    connect, leaveRoom, onExpired,
+    toggleMic, toggleCam,
+    isMicOn, isCamOn,
+    status, error, remainingMs
+  } = usePsiuFlash();
 
-  // useRef garante que a inicialização rode apenas uma vez,
-  // mesmo com React StrictMode ativo em desenvolvimento.
   const iniciouRef = useRef(false);
+
+  useEffect(() => {
+    onExpired(() => {
+      leaveRoom();
+      // redirecione o usuário aqui
+    });
+  }, []);
 
   useEffect(() => {
     if (iniciouRef.current) return;
     iniciouRef.current = true;
 
-    // OBRIGATÓRIO: sempre inicie a câmera ANTES de entrar na sala.
-    startCamera().then(() => {
-      joinRoom('id-da-sala', 'NomeDoUsuario');
-    });
+    // Professor — cria a sala automaticamente
+    connect({ papel: 'professor', nome: 'Daniel', tempo: 60 })
+      .then(({ roomId }) => console.log('Sala criada:', roomId))
+      .catch(console.error);
+
+    // Aluno — entra em uma sala existente
+    // connect({ papel: 'aluno', nome: 'Gabriel', chave: 'id-da-sala' })
   }, []);
 
   return (
-    <div style={{ display: 'flex', gap: 20, padding: 20 }}>
+    <div style={{ width: '100vw', height: '100vh', background: '#0f1115', position: 'relative' }}>
 
-      {/* Vídeo de quem está do outro lado */}
-      <div style={{ width: 600, height: 400, background: '#000' }}>
-        <RemoteVideo fallbackText="Aguardando conexão..." />
+      <div style={{ position: 'absolute', top: 16, left: 16, color: '#fff', fontFamily: 'monospace' }}>
+        <span>Status: {status}</span>
+        <span style={{ marginLeft: 12 }}>⏱ {formatTime(remainingMs)}</span>
+        {error && <span style={{ marginLeft: 12, color: 'red' }}>{error}</span>}
       </div>
 
-      {/* Seu vídeo e controles */}
-      <div style={{ width: 300, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <LocalVideo style={{ width: '100%', borderRadius: 8 }} />
+      <RemoteVideo
+        style={{ width: '100%', height: '100%' }}
+        fallbackText="Aguardando o outro participante..."
+      />
 
-        <button onClick={toggleMic}>
-          {isMicOn ? 'Mutar Microfone' : 'Ativar Microfone'}
-        </button>
-        <button onClick={toggleCam}>
-          {isCamOn ? 'Desligar Câmera' : 'Ligar Câmera'}
-        </button>
+      <div style={{ position: 'absolute', top: 16, right: 16, width: 240, aspectRatio: '16/9', borderRadius: 12, overflow: 'hidden' }}>
+        <LocalVideo style={{ width: '100%', height: '100%', transform: 'scaleX(-1)' }} />
+      </div>
+
+      <div style={{ position: 'absolute', bottom: 32, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 12 }}>
+        <button onClick={toggleMic}>{isMicOn ? 'Mutar' : 'Ativar Mic'}</button>
+        <button onClick={toggleCam}>{isCamOn ? 'Desligar Cam' : 'Ligar Cam'}</button>
+        <button onClick={leaveRoom} style={{ background: 'red', color: '#fff' }}>Sair</button>
       </div>
 
     </div>
@@ -135,24 +162,16 @@ export default function SalaDeAula() {
 
 ---
 
-### 3. Crie uma sala via API antes de entrar
+## API Reference
 
-O servidor expõe uma rota REST para criar salas. Chame ela antes de exibir a tela de vídeo:
+### `<PsiuFlashProvider />`
 
-```js
-const res = await fetch('http://localhost:3333/api/rooms', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ maxParticipants: 2, durationMinutes: 60 }),
-});
-
-const { roomId } = await res.json();
-// Passe o roomId para joinRoom(roomId, userId)
-```
+| Prop | Tipo | Padrão | Descrição |
+|---|---|---|---|
+| `serverUrl` | `String` | — | URL do servidor de sinalização |
+| `vibes` | `Boolean` | `false` | Ativa feedback sonoro via Web Audio API |
 
 ---
-
-## API Reference
 
 ### `usePsiuFlash()`
 
@@ -160,14 +179,39 @@ Hook principal — deve ser usado dentro de um componente filho do `PsiuFlashPro
 
 | Método / Estado | Tipo | Descrição |
 |---|---|---|
-| `startCamera()` | `async Function` | Solicita permissão e inicia a captura de áudio e vídeo |
-| `joinRoom(roomId, userId)` | `Function` | Entra na sala informada com o nome de usuário fornecido |
+| `connect(payload)` | `async Function` | Liga câmera, cria ou entra na sala. Retorna `{ roomId }` |
+| `leaveRoom()` | `Function` | Para câmera, fecha peers, limpa estado. Sem reload necessário |
+| `onExpired(fn)` | `Function` | Registra callback chamado quando o tempo da sala esgotar |
 | `toggleMic()` | `Function` | Ativa ou desativa o envio do seu áudio |
 | `toggleCam()` | `Function` | Ativa ou desativa o envio do seu vídeo |
 | `isMicOn` | `Boolean` | `true` se o microfone estiver ativo |
 | `isCamOn` | `Boolean` | `true` se a câmera estiver ativa |
+| `status` | `String` | `idle` \| `connecting` \| `connected` \| `reconnecting` \| `expired` \| `error` |
+| `error` | `String` | Mensagem do último erro — `null` se não houver |
+| `remainingMs` | `Number` | Tempo restante da sala em milissegundos — `null` até conectar |
 | `localStream` | `MediaStream` | Stream bruto da câmera/microfone do próprio usuário |
 | `remoteStreams` | `Array` | Lista dos participantes conectados: `[{ userId, stream }]` |
+
+#### Payload do `connect()`
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `papel` | `String` | `'professor'` cria a sala, `'aluno'` entra em uma existente |
+| `nome` | `String` | Nome do usuário — usado como `userId` |
+| `chave` | `String` | *(Opcional)* ID da sala — obrigatório para o aluno |
+| `tempo` | `Number` | *(Opcional)* Duração em minutos — padrão `60`, só para professor |
+
+---
+
+### `formatTime(ms)`
+
+```js
+import { formatTime } from 'psiu-meet-client';
+
+formatTime(null)    // '--:--'
+formatTime(300000)  // '05:00'
+formatTime(90000)   // '01:30'
+```
 
 ---
 
@@ -184,8 +228,6 @@ Renderiza a câmera do próprio usuário. Vem **mutado por padrão** para evitar
 
 ### `<RemoteVideo />`
 
-Renderiza a câmera do participante remoto.
-
 | Prop | Tipo | Padrão | Descrição |
 |---|---|---|---|
 | `stream` | `MediaStream` | — | *(Opcional)* Stream específico — útil para salas com múltiplos participantes |
@@ -198,9 +240,18 @@ Renderiza a câmera do participante remoto.
 
 ## Uso Avançado
 
-### Grid com múltiplos participantes
+### Reagir ao encerramento da sala
 
-Use `remoteStreams` para renderizar um participante por célula:
+```jsx
+useEffect(() => {
+  onExpired(() => {
+    leaveRoom();
+    navigate('/fim-da-aula');
+  });
+}, []);
+```
+
+### Grid com múltiplos participantes
 
 ```jsx
 import { usePsiuFlash, RemoteVideo } from 'psiu-meet-client';
@@ -223,181 +274,102 @@ export function GridDeParticipantes() {
 }
 ```
 
+### Countdown visual com alerta de 5 minutos
+
+```jsx
+const timerColor = remainingMs !== null && remainingMs < 300000 ? 'red' : 'white';
+
+<span style={{ color: timerColor, fontFamily: 'monospace' }}>
+  ⏱ {formatTime(remainingMs)}
+</span>
+```
+
 ---
 
 ## Backend — Servidor de Sinalização
 
-A biblioteca foi projetada para funcionar com um servidor **Node.js + Socket.io**. Abaixo está o servidor de referência oficial.
+A biblioteca foi projetada para funcionar com um servidor **Node.js + Socket.io + SQLite**. O tempo é controlado por consumo ativo — só é debitado quando os dois participantes estão conectados ao mesmo tempo.
 
 ### Instalação
 
 ```bash
-npm install express socket.io cors
-```
-
-### `server.js`
-
-```js
-const express = require('express');
-const http    = require('http');
-const { Server } = require('socket.io');
-const cors   = require('cors');
-const crypto = require('crypto');
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-
-const activeRooms = new Map();
-
-// ------------------------------------------
-// REST API
-// ------------------------------------------
-
-// Cria uma nova sala com limite de participantes e tempo de expiração.
-// Body:     { maxParticipants?: number, durationMinutes?: number }
-// Response: { roomId, expiresAt, maxParticipants }
-app.post('/api/rooms', (req, res) => {
-  const { maxParticipants = 4, durationMinutes = 60 } = req.body;
-
-  const roomId    = crypto.randomUUID();
-  const expiresAt = Date.now() + durationMinutes * 60 * 1000;
-
-  activeRooms.set(roomId, { id: roomId, maxParticipants, expiresAt, participants: new Set() });
-
-  console.log(`[+] Sala criada: ${roomId}`);
-  res.status(201).json({ roomId, expiresAt, maxParticipants });
-});
-
-// Painel de monitoramento: GET /dashboard
-app.get('/dashboard', (req, res) => {
-  const now = Date.now();
-
-  let rows = '';
-  activeRooms.forEach((room, id) => {
-    const min = Math.max(0, Math.floor((room.expiresAt - now) / 60000));
-    if (min === 0) { activeRooms.delete(id); return; }
-    rows += `<li>${id} — ${room.participants.size}/${room.maxParticipants} participantes — expira em ${min} min</li>`;
-  });
-
-  res.send(`
-    <body style="background:#111;color:#0f0;font-family:monospace;padding:20px">
-      <h1>PsiuFlash — Dashboard</h1>
-      <hr style="border-color:#333"/>
-      <ul>${rows || '<li>Nenhuma sala ativa.</li>'}</ul>
-    </body>
-  `);
-});
-
-// ------------------------------------------
-// WebRTC Signaling
-// ------------------------------------------
-
-io.on('connection', (socket) => {
-
-  socket.on('join-room', ({ roomId, userId }) => {
-    const room = activeRooms.get(roomId);
-
-    if (!room)
-      return socket.emit('error', 'Sala não existe.');
-    if (Date.now() > room.expiresAt) {
-      activeRooms.delete(roomId);
-      return socket.emit('error', 'Sala expirada.');
-    }
-    if (room.participants.size >= room.maxParticipants)
-      return socket.emit('error', 'Sala lotada.');
-
-    socket.join(roomId);
-    socket.join(userId);
-    room.participants.add(userId);
-
-    socket.roomId = roomId;
-    socket.userId = userId;
-
-    console.log(`[>] ${userId} entrou na sala ${roomId}`);
-
-    socket.to(roomId).emit('user-connected', userId);
-  });
-
-  // Repasse direto dos pacotes WebRTC entre os clientes
-  socket.on('offer',         (toId, offer)     => io.to(toId).emit('offer',         socket.userId, offer));
-  socket.on('answer',        (toId, answer)    => io.to(toId).emit('answer',        socket.userId, answer));
-  socket.on('ice-candidate', (toId, candidate) => io.to(toId).emit('ice-candidate', socket.userId, candidate));
-
-  socket.on('disconnect', () => {
-    if (socket.roomId && activeRooms.has(socket.roomId)) {
-      activeRooms.get(socket.roomId).participants.delete(socket.userId);
-      socket.to(socket.roomId).emit('user-disconnected', socket.userId);
-      console.log(`[<] ${socket.userId} saiu.`);
-    }
-  });
-});
-
-// ------------------------------------------
-// Start
-// ------------------------------------------
-
-const PORT = 3333;
-server.listen(PORT, () => console.log(`PsiuFlash rodando na porta ${PORT}`));
+npm install express socket.io cors better-sqlite3
 ```
 
 ### Eventos WebRTC
 
-| Evento | Direção | Payload |
+| Evento | Direção | Payload | Descrição |
+|---|---|---|---|
+| `join-room` | Cliente → Servidor | `{ roomId, userId }` | Entra na sala |
+| `room-joined` | Servidor → Cliente | `{ roomId, userId, remainingMs }` | Confirmação com tempo restante |
+| `user-connected` | Servidor → Sala | `userId` | Outro participante entrou |
+| `user-disconnected` | Servidor → Sala | `userId` | Participante saiu |
+| `timer-update` | Servidor → Sala | `{ remainingMs }` | Sincronização do timer a cada 10s |
+| `timer-paused` | Servidor → Sala | `{ remainingMs }` | Timer pausado — menos de 2 participantes |
+| `timer-expired` | Servidor → Sala | — | Tempo esgotado — sala encerrada |
+| `offer` | Cliente → Cliente | `(toId, offer)` | Oferta WebRTC |
+| `answer` | Cliente → Cliente | `(toId, answer)` | Resposta WebRTC |
+| `ice-candidate` | Cliente → Cliente | `(toId, candidate)` | Candidatos ICE |
+| `error` | Servidor → Cliente | `mensagem string` | Sala inexistente, expirada, finalizada ou lotada |
+
+### Rotas REST
+
+| Método | Rota | Descrição |
 |---|---|---|
-| `join-room` | Cliente → Servidor | `{ roomId, userId }` |
-| `user-connected` | Servidor → Sala | `userId` |
-| `user-disconnected` | Servidor → Sala | `userId` |
-| `offer` | Cliente → Cliente | `(toId, offer)` |
-| `answer` | Cliente → Cliente | `(toId, answer)` |
-| `ice-candidate` | Cliente → Cliente | `(toId, candidate)` |
-| `error` | Servidor → Cliente | `mensagem string` |
+| `POST` | `/api/rooms` | Cria uma sala. Body: `{ maxParticipants?, durationMinutes? }` |
+| `GET` | `/api/rooms/:roomId` | Tempo restante e participantes online |
+| `GET` | `/api/rooms/:roomId/history` | Histórico completo com entradas e saídas |
+| `GET` | `/api/history` | Histórico geral de todas as salas |
+| `GET` | `/dashboard` | Painel de monitoramento em HTML |
 
-### Exemplo de criação de sala via curl
-
-```bash
-curl -X POST http://localhost:3333/api/rooms \
-  -H "Content-Type: application/json" \
-  -d '{ "maxParticipants": 2, "durationMinutes": 60 }'
-```
-
-```json
-{
-  "roomId": "a3f2c1d4-...",
-  "expiresAt": 1718000000000,
-  "maxParticipants": 2
-}
-```
+> O código completo do servidor está disponível no repositório: [github.com/Danielpvbrbr/psiu-meet-client](https://github.com/Danielpvbrbr/psiu-meet-client)
 
 ---
 
 ## Notas Importantes
 
-**Ordem de inicialização obrigatória**
-Sempre chame `startCamera()` antes de `joinRoom()`. Se a câmera não estiver ativa no momento da negociação WebRTC, nenhuma track de vídeo ou áudio será enviada.
+**`connect()` substitui `startCamera()` + `joinRoom()`**
+Cuida de tudo em uma chamada: liga câmera, aguarda socket e entra na sala. Professor cria a sala automaticamente se não passar `chave`.
 
-**Proteção contra dupla execução**
-Em desenvolvimento com React StrictMode, o `useEffect` executa duas vezes. Use um `useRef` de guarda para garantir que `startCamera()` e `joinRoom()` sejam chamados apenas uma vez:
+**Registre `onExpired` antes de chamar `connect()`**
+
+```js
+useEffect(() => {
+  onExpired(() => { leaveRoom(); onSair(); });
+}, []);
+```
+
+**`leaveRoom()` não precisa de reload**
+Para a câmera, fecha todos os peers e limpa o estado internamente.
+
+**Timer por consumo ativo**
+O tempo só é debitado quando os dois participantes estão conectados simultaneamente. Se a internet cair, o timer pausa e retoma quando reconectar.
+
+**Proteção contra dupla execução no StrictMode**
 
 ```js
 const iniciouRef = useRef(false);
-
 useEffect(() => {
   if (iniciouRef.current) return;
   iniciouRef.current = true;
-  // ... sua lógica aqui
+  connect(payload);
 }, []);
 ```
 
 **Múltiplos Providers**
-Não monte mais de um `<PsiuFlashProvider>` ao mesmo tempo. Cada instância abre uma conexão Socket independente e isso gera conflito nos eventos WebRTC.
+Não monte mais de um `<PsiuFlashProvider>` ao mesmo tempo.
 
 **HTTPS em produção**
-Navegadores bloqueiam acesso à câmera e microfone em origens `http://` que não sejam `localhost`. Em produção, seu servidor e seu frontend precisam rodar em `https://`.
+Navegadores bloqueiam câmera e microfone em origens `http://` que não sejam `localhost`. Em produção, use `https://`.
 
 ---
 
-<p align="center">Feito para simplificar comunicação em tempo real.</p>
+## Licença
+
+MIT © [Daniel](https://github.com/Danielpvbrbr)
+
+---
+
+<p align="center">
+  Feito com ❤️ por <a href="https://github.com/Danielpvbrbr">Danielpvbrbr</a>
+</p>

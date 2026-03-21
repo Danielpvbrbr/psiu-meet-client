@@ -1,2 +1,2 @@
-export { PsiuFlashProvider, usePsiuFlash } from './PsiuFlashContext';
+export { PsiuFlashProvider, usePsiuFlash, formatTime } from './PsiuFlashContext';
 export { LocalVideo, RemoteVideo } from './VideoComponents';

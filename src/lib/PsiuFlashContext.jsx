@@ -10,33 +10,92 @@ const ICE_SERVERS = {
   ]
 };
 
-export function PsiuFlashProvider({ children, serverUrl }) {
+// ─────────────────────────────────────────────
+// VIBES — Feedback sonoro opcional
+// ─────────────────────────────────────────────
+function playTone({ frequency = 440, type = 'sine', duration = 0.3, volume = 0.3 } = {}) {
+  try {
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const gain = ctx.createGain();
+    const osc  = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(frequency, ctx.currentTime);
+    gain.gain.setValueAtTime(volume, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + duration);
+    osc.onended = () => ctx.close();
+  } catch {}
+}
+
+const vibesSounds = {
+  // Você entrou na sala — acorde ascendente suave
+  joined: () => {
+    playTone({ frequency: 440, duration: 0.15, volume: 0.2 });
+    setTimeout(() => playTone({ frequency: 554, duration: 0.15, volume: 0.2 }), 120);
+    setTimeout(() => playTone({ frequency: 659, duration: 0.25, volume: 0.25 }), 240);
+  },
+  // Outro participante entrou — ping suave
+  userConnected: () => {
+    playTone({ frequency: 880, duration: 0.2, volume: 0.15 });
+    setTimeout(() => playTone({ frequency: 1100, duration: 0.2, volume: 0.15 }), 150);
+  },
+  // Participante saiu — tom descendente
+  userDisconnected: () => {
+    playTone({ frequency: 660, duration: 0.15, volume: 0.15 });
+    setTimeout(() => playTone({ frequency: 440, duration: 0.25, volume: 0.15 }), 130);
+  },
+  // Aviso de tempo — tick sutil (< 5min)
+  timerWarning: () => {
+    playTone({ frequency: 1000, duration: 0.08, volume: 0.1, type: 'square' });
+  },
+  // Sala encerrada — acorde descendente final
+  expired: () => {
+    playTone({ frequency: 523, duration: 0.2, volume: 0.2 });
+    setTimeout(() => playTone({ frequency: 415, duration: 0.2, volume: 0.2 }), 180);
+    setTimeout(() => playTone({ frequency: 330, duration: 0.4, volume: 0.2 }), 360);
+  },
+};
+
+// ─────────────────────────────────────────────
+// PROVIDER
+// ─────────────────────────────────────────────
+export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
   const [localStream,   setLocalStream]  = useState(null);
   const [remoteStreams, setRemoteStreams] = useState([]);
   const [isMicOn,       setIsMicOn]      = useState(true);
   const [isCamOn,       setIsCamOn]      = useState(true);
-  const [status,        setStatus]       = useState('idle'); // idle | connecting | connected | reconnecting | error
+  const [status,        setStatus]       = useState('idle'); // idle | connecting | connected | reconnecting | expired | error
   const [error,         setError]        = useState(null);
   const [remainingMs,   setRemainingMs]  = useState(null);
 
-  const socketRef      = useRef(null);
-  const peersRef       = useRef({});
-  const localStreamRef = useRef(null);
-  const sessionRef     = useRef(null);
-  const remainingMsRef = useRef(null);
+  const socketRef             = useRef(null);
+  const peersRef              = useRef({});
+  const localStreamRef        = useRef(null);
+  const sessionRef            = useRef(null);
+  const remainingMsRef        = useRef(null);
+  const onExpiredRef          = useRef(null);
+  const vibesWarningFiredRef  = useRef(false);
 
-  // Mantém o ref sincronizado com o state
   useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
 
-  // Countdown local — decrementa 1s por vez, servidor corrige o drift a cada 10s
+  // Countdown local — servidor corrige o drift a cada 10s
   useEffect(() => {
     const interval = setInterval(() => {
       if (remainingMsRef.current === null || remainingMsRef.current <= 0) return;
       remainingMsRef.current -= 1000;
       setRemainingMs(remainingMsRef.current);
+
+      // Aviso sonoro uma vez ao entrar nos últimos 5 minutos
+      if (vibes && remainingMsRef.current <= 300000 && remainingMsRef.current > 299000 && !vibesWarningFiredRef.current) {
+        vibesWarningFiredRef.current = true;
+        vibesSounds.timerWarning();
+      }
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [vibes]);
 
   const syncTimer = useCallback((ms) => {
     remainingMsRef.current = ms;
@@ -64,13 +123,19 @@ export function PsiuFlashProvider({ children, serverUrl }) {
       syncTimer(remainingMs);
       setStatus('connected');
       setError(null);
+      if (vibes) vibesSounds.joined();
     });
 
-    socket.on('user-connected',    (userId)           => { peersRef.current[userId] = createPeer(userId, socket, true); });
-    socket.on('user-disconnected', (userId)           => {
+    socket.on('user-connected', (userId) => {
+      peersRef.current[userId] = createPeer(userId, socket, true);
+      if (vibes) vibesSounds.userConnected();
+    });
+
+    socket.on('user-disconnected', (userId) => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
       setRemoteStreams(prev => prev.filter(s => s.userId !== userId));
+      if (vibes) vibesSounds.userDisconnected();
     });
 
     socket.on('offer', async (userId, offer) => {
@@ -85,15 +150,21 @@ export function PsiuFlashProvider({ children, serverUrl }) {
     socket.on('answer',        async (userId, answer)    => { await peersRef.current[userId]?.setRemoteDescription(new RTCSessionDescription(answer)); });
     socket.on('ice-candidate',       (userId, candidate) => { peersRef.current[userId]?.addIceCandidate(new RTCIceCandidate(candidate)); });
 
-    socket.on('timer-update',  ({ remainingMs }) => syncTimer(remainingMs));
-    socket.on('timer-paused',  ({ remainingMs }) => syncTimer(remainingMs));
-    socket.on('timer-expired', ()                => { syncTimer(0); setStatus('error'); setError('Tempo da sala esgotado.'); });
+    socket.on('timer-update', ({ remainingMs }) => syncTimer(remainingMs));
+    socket.on('timer-paused', ({ remainingMs }) => syncTimer(remainingMs));
+
+    socket.on('timer-expired', () => {
+      syncTimer(0);
+      setStatus('expired');
+      if (vibes) vibesSounds.expired();
+      onExpiredRef.current?.();
+    });
 
     socket.on('error',      (msg) => { setError(msg); setStatus('error'); });
     socket.on('disconnect', ()    => { if (sessionRef.current) setStatus('reconnecting'); });
 
     return () => { socket.disconnect(); socketRef.current = null; };
-  }, [serverUrl, syncTimer]);
+  }, [serverUrl, syncTimer, vibes]);
 
   // ─────────────────────────────────────────────
   // WEBRTC
@@ -141,31 +212,51 @@ export function PsiuFlashProvider({ children, serverUrl }) {
     socket.once('connect_error', () => reject(new Error('Falha ao conectar no servidor')));
   });
 
-  const startSession = useCallback(async (roomId, userId) => {
+  const connect = useCallback(async ({ papel, nome, chave, tempo }) => {
     setStatus('connecting');
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localStreamRef.current = stream;
       setLocalStream(stream);
+
       await waitForSocket();
-      sessionRef.current = { roomId, userId };
-      socketRef.current.emit('join-room', { roomId, userId });
+
+      let roomId = chave;
+
+      if (papel === 'professor' && !chave) {
+        const res = await fetch(`${serverUrl}/api/rooms`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ maxParticipants: 2, durationMinutes: tempo || 60 }),
+        });
+        const data = await res.json();
+        roomId = data.roomId;
+      }
+
+      if (!roomId) throw new Error('Nenhuma chave de sala fornecida.');
+
+      sessionRef.current = { roomId, userId: nome };
+      socketRef.current.emit('join-room', { roomId, userId: nome });
+
+      return { roomId };
     } catch (err) {
       const msg = err.name === 'NotAllowedError'
         ? 'Permissão de câmera/microfone negada.'
-        : err.message || 'Erro ao iniciar sessão.';
+        : err.message || 'Erro ao conectar.';
       setError(msg);
       setStatus('error');
       throw err;
     }
-  }, []);
+  }, [serverUrl]);
 
   const leaveRoom = useCallback(() => {
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     Object.values(peersRef.current).forEach(p => p.close());
-    peersRef.current  = {};
-    sessionRef.current = null;
+    peersRef.current            = {};
+    sessionRef.current          = null;
+    onExpiredRef.current        = null;
+    vibesWarningFiredRef.current = false;
     syncTimer(null);
     setLocalStream(null);
     setRemoteStreams([]);
@@ -174,6 +265,8 @@ export function PsiuFlashProvider({ children, serverUrl }) {
     setIsMicOn(true);
     setIsCamOn(true);
   }, [syncTimer]);
+
+  const onExpired = useCallback((fn) => { onExpiredRef.current = fn; }, []);
 
   const toggleMic = useCallback(() => {
     const track = localStream?.getAudioTracks()[0];
@@ -188,7 +281,7 @@ export function PsiuFlashProvider({ children, serverUrl }) {
   return (
     <PsiuFlashContext.Provider value={{
       localStream, remoteStreams, isMicOn, isCamOn, status, error, remainingMs,
-      startSession, leaveRoom, toggleMic, toggleCam,
+      connect, leaveRoom, toggleMic, toggleCam, onExpired,
     }}>
       {children}
     </PsiuFlashContext.Provider>
@@ -231,3 +324,10 @@ export function RemoteVideo({ stream: streamProp, muted = false, style, classNam
 
   return <video ref={videoRef} autoPlay playsInline muted={muted} style={{ objectFit: 'cover', ...style }} className={className} />;
 }
+
+export const formatTime = (ms) => {
+  if (ms === null) return '--:--';
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+};

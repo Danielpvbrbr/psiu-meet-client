@@ -15,9 +15,9 @@ const ICE_SERVERS = {
 // ─────────────────────────────────────────────
 function playTone({ frequency = 440, type = 'sine', duration = 0.3, volume = 0.3 } = {}) {
   try {
-    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const gain = ctx.createGain();
-    const osc  = ctx.createOscillator();
+    const osc = ctx.createOscillator();
     osc.type = type;
     osc.frequency.setValueAtTime(frequency, ctx.currentTime);
     gain.gain.setValueAtTime(volume, ctx.currentTime);
@@ -27,7 +27,7 @@ function playTone({ frequency = 440, type = 'sine', duration = 0.3, volume = 0.3
     osc.start();
     osc.stop(ctx.currentTime + duration);
     osc.onended = () => ctx.close();
-  } catch {}
+  } catch { }
 }
 
 const vibesSounds = {
@@ -59,25 +59,51 @@ const vibesSounds = {
   },
 };
 
+function startSpeakingDetection(stream, onSpeaking) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = ctx.createAnalyser();
+    const source = ctx.createMediaStreamSource(stream);
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const interval = setInterval(() => {
+      analyser.getByteFrequencyData(data);
+      const avg = data.reduce((a, b) => a + b, 0) / data.length;
+      onSpeaking(avg > 10);
+    }, 100);
+    return () => { clearInterval(interval); ctx.close(); };
+  } catch { return () => { }; }
+}
+
 // ─────────────────────────────────────────────
 // PROVIDER
 // ─────────────────────────────────────────────
 export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
-  const [localStream,   setLocalStream]  = useState(null);
+  const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState([]);
-  const [isMicOn,       setIsMicOn]      = useState(true);
-  const [isCamOn,       setIsCamOn]      = useState(true);
-  const [status,        setStatus]       = useState('idle'); // idle | connecting | connected | reconnecting | expired | error
-  const [error,         setError]        = useState(null);
-  const [remainingMs,   setRemainingMs]  = useState(null);
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [isCamOn, setIsCamOn] = useState(true);
+  const [status, setStatus] = useState('idle'); // idle | connecting | connected | reconnecting | expired | error
+  const [error, setError] = useState(null);
+  const [remainingMs, setRemainingMs] = useState(null);
 
-  const socketRef             = useRef(null);
-  const peersRef              = useRef({});
-  const localStreamRef        = useRef(null);
-  const sessionRef            = useRef(null);
-  const remainingMsRef        = useRef(null);
-  const onExpiredRef          = useRef(null);
-  const vibesWarningFiredRef  = useRef(false);
+  const socketRef = useRef(null);
+  const peersRef = useRef({});
+  const localStreamRef = useRef(null);
+  const sessionRef = useRef(null);
+  const remainingMsRef = useRef(null);
+  const onExpiredRef = useRef(null);
+  const vibesWarningFiredRef = useRef(false);
+
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [remoteSpeaking, setRemoteSpeaking] = useState(false);
+  const localSpeakingCleanupRef = useRef(null);
+
+  const [connectionQuality, setConnectionQuality] = useState('unknown'); // unknown | good | fair | poor
+  const qualityIntervalRef = useRef(null);
+
+  const remoteSpeakingCleanupRef = useRef(null);
 
   useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
 
@@ -147,8 +173,8 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
       socket.emit('answer', userId, answer);
     });
 
-    socket.on('answer',        async (userId, answer)    => { await peersRef.current[userId]?.setRemoteDescription(new RTCSessionDescription(answer)); });
-    socket.on('ice-candidate',       (userId, candidate) => { peersRef.current[userId]?.addIceCandidate(new RTCIceCandidate(candidate)); });
+    socket.on('answer', async (userId, answer) => { await peersRef.current[userId]?.setRemoteDescription(new RTCSessionDescription(answer)); });
+    socket.on('ice-candidate', (userId, candidate) => { peersRef.current[userId]?.addIceCandidate(new RTCIceCandidate(candidate)); });
 
     socket.on('timer-update', ({ remainingMs }) => syncTimer(remainingMs));
     socket.on('timer-paused', ({ remainingMs }) => syncTimer(remainingMs));
@@ -160,22 +186,63 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
       onExpiredRef.current?.();
     });
 
-    socket.on('error',      (msg) => { setError(msg); setStatus('error'); });
-    socket.on('disconnect', ()    => { if (sessionRef.current) setStatus('reconnecting'); });
+    socket.on('error', (msg) => { setError(msg); setStatus('error'); });
+    socket.on('disconnect', () => { if (sessionRef.current) setStatus('reconnecting'); });
 
     return () => { socket.disconnect(); socketRef.current = null; };
   }, [serverUrl, syncTimer, vibes]);
 
+  function getQualityFromStats({ rtt, packetsLost, jitter }) {
+    if (rtt === null) return 'unknown';
+    if (rtt < 100 && packetsLost < 2 && jitter < 20) return 'good';
+    if (rtt < 250 && packetsLost < 8 && jitter < 50) return 'fair';
+    return 'poor';
+  }
+
+  async function measureConnectionQuality(peer, onQuality) {
+    try {
+      const stats = await peer.getStats();
+      let rtt = null;
+      let packetsLost = 0;
+      let jitter = 0;
+
+      stats.forEach(report => {
+        if (report.type === 'remote-inbound-rtp') {
+          rtt = report.roundTripTime ? report.roundTripTime * 1000 : null; // converte para ms
+          packetsLost = report.packetsLost ?? 0;
+          jitter = report.jitter ? report.jitter * 1000 : 0;
+        }
+      });
+
+      onQuality(getQualityFromStats({ rtt, packetsLost, jitter }));
+    } catch { }
+  }
   // ─────────────────────────────────────────────
   // WEBRTC
   // ─────────────────────────────────────────────
   const createPeer = (userId, socket, isInitiator) => {
     const peer = new RTCPeerConnection(ICE_SERVERS);
 
+    peer.onconnectionstatechange = () => {
+      if (peer.connectionState === 'connected') {
+        // Começa a medir a qualidade a cada 3s
+        qualityIntervalRef.current = setInterval(() => {
+          measureConnectionQuality(peer, setConnectionQuality);
+        }, 3000);
+      }
+      if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
+        clearInterval(qualityIntervalRef.current);
+        setConnectionQuality('unknown');
+      }
+    };
+
     peer.ontrack = ({ streams: [stream] }) => {
       setRemoteStreams(prev =>
         prev.find(s => s.userId === userId) ? prev : [...prev, { userId, stream }]
       );
+      // Detecção de fala remota
+      remoteSpeakingCleanupRef.current?.();
+      remoteSpeakingCleanupRef.current = startSpeakingDetection(stream, setRemoteSpeaking);
     };
 
     peer.onicecandidate = ({ candidate }) => {
@@ -206,13 +273,13 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
   // ─────────────────────────────────────────────
   const waitForSocket = () => new Promise((resolve, reject) => {
     const socket = socketRef.current;
-    if (!socket)          return reject(new Error('Socket não inicializado'));
+    if (!socket) return reject(new Error('Socket não inicializado'));
     if (socket.connected) return resolve(socket);
-    socket.once('connect',       () => resolve(socket));
+    socket.once('connect', () => resolve(socket));
     socket.once('connect_error', () => reject(new Error('Falha ao conectar no servidor')));
   });
 
-  const connect = useCallback(async ({ papel, nome, chave, tempo }) => {
+  const connect = useCallback(async ({ papel, nome, id, chave, tempo, maxParticipants = 2 }) => {
     setStatus('connecting');
     setError(null);
     try {
@@ -220,24 +287,34 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
       localStreamRef.current = stream;
       setLocalStream(stream);
 
+      // Detecção de fala local
+      localSpeakingCleanupRef.current?.();
+      localSpeakingCleanupRef.current = startSpeakingDetection(stream, setIsSpeaking);
+
       await waitForSocket();
 
       let roomId = chave;
 
-      if (papel === 'professor' && !chave) {
+      if (papel === 'professor') {
         const res = await fetch(`${serverUrl}/api/rooms`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ maxParticipants: 2, durationMinutes: tempo || 60 }),
+          body: JSON.stringify({
+            maxParticipants,
+            durationMinutes: tempo || 60,
+            roomId: chave || undefined, // ← passa a chave customizada se tiver
+          }),
         });
         const data = await res.json();
+        if (data.error) throw new Error(data.error);
         roomId = data.roomId;
       }
 
       if (!roomId) throw new Error('Nenhuma chave de sala fornecida.');
 
-      sessionRef.current = { roomId, userId: nome };
-      socketRef.current.emit('join-room', { roomId, userId: nome });
+      const userId = id || nome;
+      sessionRef.current = { roomId, userId };
+      socketRef.current.emit('join-room', { roomId, userId });
 
       return { roomId };
     } catch (err) {
@@ -253,9 +330,9 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
   const leaveRoom = useCallback(() => {
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     Object.values(peersRef.current).forEach(p => p.close());
-    peersRef.current            = {};
-    sessionRef.current          = null;
-    onExpiredRef.current        = null;
+    peersRef.current = {};
+    sessionRef.current = null;
+    onExpiredRef.current = null;
     vibesWarningFiredRef.current = false;
     syncTimer(null);
     setLocalStream(null);
@@ -264,6 +341,18 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
     setError(null);
     setIsMicOn(true);
     setIsCamOn(true);
+
+
+    localSpeakingCleanupRef.current?.();
+    remoteSpeakingCleanupRef.current?.();
+    localSpeakingCleanupRef.current = null;
+    remoteSpeakingCleanupRef.current = null;
+    setIsSpeaking(false);
+    setRemoteSpeaking(false);
+
+    clearInterval(qualityIntervalRef.current);
+    qualityIntervalRef.current = null;
+    setConnectionQuality('unknown');
   }, [syncTimer]);
 
   const onExpired = useCallback((fn) => { onExpiredRef.current = fn; }, []);
@@ -281,6 +370,7 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
   return (
     <PsiuFlashContext.Provider value={{
       localStream, remoteStreams, isMicOn, isCamOn, status, error, remainingMs,
+      isSpeaking, remoteSpeaking, connectionQuality,
       connect, leaveRoom, toggleMic, toggleCam, onExpired,
     }}>
       {children}

@@ -6,7 +6,7 @@
 [![license](https://img.shields.io/npm/l/psiu-meet-client)](https://github.com/Danielpvbrbr/psiu-meet-client/blob/main/LICENSE)
 [![GitHub](https://img.shields.io/badge/github-Danielpvbrbr-black?logo=github)](https://github.com/Danielpvbrbr/psiu-meet-client)
 
-Toda a complexidade de sinalização, túneis ICE/STUN e troca de pacotes fica escondida. Para você, apenas **Hooks limpos** e **Componentes de Vídeo modulares** — sem layouts engessados, sem iframes. 100% customizável.
+ **Hooks limpos** e **Componentes de Vídeo modulares** — sem layouts engessados, sem iframes. 100% customizável.
 
 ---
 
@@ -38,7 +38,7 @@ npm install psiu-meet-client
 
 A `psiu-meet-client` é o **cliente React**. Para funcionar, ela precisa de um servidor de sinalização rodando. O código completo do servidor está disponível no repositório:
 
-👉 [github.com/Danielpvbrbr/psiu-meet-client](https://github.com/Danielpvbrbr/psiu-meet-client)
+👉 [github.com/Danielpvbrbr/psiumeet-server](https://github.com/Danielpvbrbr/psiumeet-server)
 
 Suba o servidor, anote a URL (ex: `https://sua-api.com`) e use-a no `serverUrl` do Provider.
 

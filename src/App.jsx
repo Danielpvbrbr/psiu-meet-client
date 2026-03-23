@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import Draggable from 'react-draggable';
-import { Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, GripVertical, User, GraduationCap, Code, AlertTriangle, Loader2 } from 'lucide-react';
-import { PsiuFlashProvider, usePsiuFlash, formatTime } from './lib/PsiuFlashContext';
+import { Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, GripVertical, User, GraduationCap, Code, AlertTriangle, Loader2, WifiOff } from 'lucide-react';
+import { PsiuFlashProvider, usePsiuFlash, formatTime, VIDEO_QUALITY_PRESETS } from './lib/PsiuFlashContext';
 import { LocalVideo, RemoteVideo } from './lib/VideoComponents';
 
 const SERVER_URL  = 'http://localhost:3333';
@@ -42,6 +42,47 @@ function ControlBtn({ onClick, active, children }) {
     <button onClick={onClick} className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all active:scale-95 ${active ? 'bg-slate-700/50 hover:bg-slate-600 text-white' : 'bg-red-500 text-white'}`}>
       {children}
     </button>
+  );
+}
+
+// ─────────────────────────────────────────────
+// SELETOR DE QUALIDADE DE VÍDEO
+// Exibe spinner enquanto applyConstraints está rodando
+// ─────────────────────────────────────────────
+function VideoQualitySelector() {
+  const { videoQuality, setVideoQuality } = usePsiuFlash();
+  const [applying, setApplying] = useState(null);
+  const presets = Object.keys(VIDEO_QUALITY_PRESETS);
+
+  const handleChange = async (preset) => {
+    if (preset === videoQuality || applying) return;
+    setApplying(preset);
+    await setVideoQuality(preset);
+    setApplying(null);
+  };
+
+  return (
+    <div className="flex items-center gap-1 bg-slate-800/60 rounded-xl px-2 py-1.5 border border-white/5">
+      {presets.map((preset) => {
+        const isActive   = videoQuality === preset;
+        const isApplying = applying === preset;
+        return (
+          <button
+            key={preset}
+            onClick={() => handleChange(preset)}
+            disabled={!!applying}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all active:scale-95 flex items-center gap-1 disabled:cursor-wait ${
+              isActive
+                ? 'bg-slate-100 text-slate-900'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+            }`}
+          >
+            {isApplying && <Loader2 size={10} className="animate-spin" />}
+            {preset}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -109,15 +150,32 @@ function ModalEncerramento({ onFim }) {
   );
 }
 
+// ─────────────────────────────────────────────
+// OVERLAY DE RECONEXÃO
+// Aparece sobre o vídeo quando o socket cai — deixa claro
+// que está tentando voltar sem bloquear a tela toda
+// ─────────────────────────────────────────────
+function OverlayReconectando() {
+  return (
+    <div className="absolute inset-0 z-40 flex items-end justify-center pb-32 pointer-events-none">
+      <div className="flex items-center gap-3 bg-yellow-500/90 backdrop-blur-sm text-yellow-950 px-5 py-3 rounded-2xl shadow-lg font-medium text-sm">
+        <WifiOff size={16} />
+        Reconectando...
+        <Loader2 size={14} className="animate-spin" />
+      </div>
+    </div>
+  );
+}
+
 // ============================================================================
 // PAINEL DE TESTE
 // ============================================================================
 function TelaDeMock({ onInjetarJson, salaAtivaId }) {
   const [jsonProfStr, setJsonProfStr] = useState(
-    JSON.stringify({ papel: 'professor', nome: 'Daniel', id: 'usr_daniel_001', chave: 'sala-123', tempo: 60, maxParticipants: 2, avatar: 'https://ui-avatars.com/api/?name=Daniel&background=random' }, null, 2)
+    JSON.stringify({ papel: 'professor', nome: 'Daniel', id: 'usr_daniel_001', chave: '', tempo: 60, maxParticipants: 2, avatar: 'https://ui-avatars.com/api/?name=Daniel&background=random' }, null, 2)
   );
   const [jsonAlunoStr, setJsonAlunoStr] = useState(
-    JSON.stringify({ papel: 'aluno', nome: 'Gabriel', id: 'usr_gabriel_002', chave: salaAtivaId || 'sala-123', avatar: 'https://ui-avatars.com/api/?name=Gabriel&background=random' }, null, 2)
+    JSON.stringify({ papel: 'aluno', nome: 'Gabriel', id: 'usr_gabriel_002', chave: salaAtivaId || '', avatar: 'https://ui-avatars.com/api/?name=Gabriel&background=random' }, null, 2)
   );
 
   useEffect(() => {
@@ -203,6 +261,9 @@ function SalaDeVideo({ payload, onSair, salaId, setSalaId }) {
 
       {encerrando && <ModalEncerramento onFim={sair} />}
 
+      {/* Overlay de reconexão — aparece sobre tudo sem bloquear */}
+      {status === 'reconnecting' && !encerrando && <OverlayReconectando />}
+
       {avisoFim && !encerrando && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-yellow-500 text-yellow-950 px-5 py-2.5 rounded-full shadow-lg font-semibold text-sm">
           ⏳ Encerrando em {formatTime(remainingMs)}
@@ -216,24 +277,25 @@ function SalaDeVideo({ payload, onSair, salaId, setSalaId }) {
         <span className="text-slate-600">|</span>
         <span className="text-xs font-mono text-slate-400">{payload.chave || salaId}</span>
         <span className={`px-2 py-0.5 text-[10px] uppercase font-bold rounded ${isProfessor ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{payload.papel}</span>
-        {status === 'reconnecting' && <span className="px-2 py-0.5 text-[10px] rounded font-medium bg-yellow-500/20 text-yellow-400">Reconectando...</span>}
         <span className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded ${timerColor}`}>⏱ {formatTime(remainingMs)}</span>
         <QualityIndicator quality={connectionQuality} />
       </div>
 
       {/* Vídeo remoto */}
       <div className={`absolute inset-0 z-0 transition-all duration-150 ${remoteSpeaking ? 'ring-4 ring-inset ring-emerald-400/40' : ''}`}>
-        <RemoteVideo className="w-full h-full object-cover" fallbackText="" />
+        <RemoteVideo className="w-full h-full" fallbackText="" />
       </div>
 
-      {/* PiP arrastável */}
+      {/* PiP arrastável
+          IMPORTANTE: LocalVideo já aplica scaleX(-1) internamente —
+          não passe scale-x-[-1] via className ou o espelho se cancela */}
       <Draggable nodeRef={janelaVideoRef} bounds="parent" defaultPosition={{ x: 0, y: 0 }}>
         <div ref={janelaVideoRef} className={`absolute top-6 right-6 z-20 w-72 aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border-2 transition-all duration-150 group cursor-grab active:cursor-grabbing ${isSpeaking ? 'border-emerald-400 shadow-emerald-400/30 shadow-lg' : 'border-white/5'}`}>
           <div className="absolute inset-y-0 left-0 w-6 flex items-center justify-center bg-slate-800/80 opacity-0 group-hover:opacity-100 transition-opacity">
             <GripVertical size={16} className="text-white/40" />
           </div>
           {isCamOn
-            ? <LocalVideo className="w-full h-full object-cover scale-x-[-1]" />
+            ? <LocalVideo className="w-full h-full" />
             : <div className="w-full h-full flex items-center justify-center bg-slate-900"><Avatar nome={payload.nome} avatar={payload.avatar} /></div>
           }
           <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/50 backdrop-blur-sm rounded text-xs text-white/70 flex items-center gap-1">
@@ -248,6 +310,7 @@ function SalaDeVideo({ payload, onSair, salaId, setSalaId }) {
       <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-slate-900/80 backdrop-blur-lg px-8 py-5 rounded-full shadow-2xl border border-white/10">
         <ControlBtn onClick={toggleMic} active={isMicOn}>{isMicOn ? <Mic size={26} /> : <MicOff size={26} />}</ControlBtn>
         <ControlBtn onClick={toggleCam} active={isCamOn}>{isCamOn ? <VideoIcon size={26} /> : <VideoOff size={26} />}</ControlBtn>
+        <VideoQualitySelector />
         <div className="w-px h-10 bg-white/10 mx-2" />
         <button onClick={sair} className="flex items-center gap-3 px-8 py-4 rounded-full bg-red-500 hover:bg-red-600 text-white font-semibold text-lg shadow-lg transition-all hover:scale-105">
           <PhoneOff size={24} /> Sair
@@ -272,8 +335,8 @@ export default function App() {
     if (roomId) salvar(payload, roomId);
   }, [payload, salaAtivaId]);
 
-  const handleSair = () => { localStorage.removeItem(SESSION_KEY); setPayload(null); setSalaAtivaId(null); };
-  const handleSetSalaId = (id) => { setSalaAtivaId(id); salvar(payload, id); };
+  const handleSair      = ()    => { localStorage.removeItem(SESSION_KEY); setPayload(null); setSalaAtivaId(null); };
+  const handleSetSalaId = (id)  => { setSalaAtivaId(id); salvar(payload, id); };
 
   return (
     <div className="fixed inset-0 w-screen h-screen bg-slate-950">

@@ -11,13 +11,28 @@ const ICE_SERVERS = {
 };
 
 // ─────────────────────────────────────────────
+// PRESETS DE QUALIDADE
+// ─────────────────────────────────────────────
+export const VIDEO_QUALITY_PRESETS = {
+  '480p': { width: { ideal: 854 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+  '720p': { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+  '1080p': { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+};
+
+export const VIDEO_QUALITY_BITRATE = {
+  '480p': 1_000_000,
+  '720p': 2_500_000,
+  '1080p': 5_000_000,
+};
+
+// ─────────────────────────────────────────────
 // VIBES
 // ─────────────────────────────────────────────
 function playTone({ frequency = 440, type = 'sine', duration = 0.3, volume = 0.3 } = {}) {
   try {
-    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const gain = ctx.createGain();
-    const osc  = ctx.createOscillator();
+    const osc = ctx.createOscillator();
     osc.type = type;
     osc.frequency.setValueAtTime(frequency, ctx.currentTime);
     gain.gain.setValueAtTime(volume, ctx.currentTime);
@@ -27,15 +42,15 @@ function playTone({ frequency = 440, type = 'sine', duration = 0.3, volume = 0.3
     osc.start();
     osc.stop(ctx.currentTime + duration);
     osc.onended = () => ctx.close();
-  } catch {}
+  } catch { }
 }
 
 const vibesSounds = {
-  joined:           () => { playTone({ frequency: 440, duration: 0.15, volume: 0.2 }); setTimeout(() => playTone({ frequency: 554, duration: 0.15, volume: 0.2 }), 120); setTimeout(() => playTone({ frequency: 659, duration: 0.25, volume: 0.25 }), 240); },
-  userConnected:    () => { playTone({ frequency: 880, duration: 0.2, volume: 0.15 }); setTimeout(() => playTone({ frequency: 1100, duration: 0.2, volume: 0.15 }), 150); },
+  joined: () => { playTone({ frequency: 440, duration: 0.15, volume: 0.2 }); setTimeout(() => playTone({ frequency: 554, duration: 0.15, volume: 0.2 }), 120); setTimeout(() => playTone({ frequency: 659, duration: 0.25, volume: 0.25 }), 240); },
+  userConnected: () => { playTone({ frequency: 880, duration: 0.2, volume: 0.15 }); setTimeout(() => playTone({ frequency: 1100, duration: 0.2, volume: 0.15 }), 150); },
   userDisconnected: () => { playTone({ frequency: 660, duration: 0.15, volume: 0.15 }); setTimeout(() => playTone({ frequency: 440, duration: 0.25, volume: 0.15 }), 130); },
-  timerWarning:     () => { playTone({ frequency: 1000, duration: 0.08, volume: 0.1, type: 'square' }); },
-  expired:          () => { playTone({ frequency: 523, duration: 0.2, volume: 0.2 }); setTimeout(() => playTone({ frequency: 415, duration: 0.2, volume: 0.2 }), 180); setTimeout(() => playTone({ frequency: 330, duration: 0.4, volume: 0.2 }), 360); },
+  timerWarning: () => { playTone({ frequency: 1000, duration: 0.08, volume: 0.1, type: 'square' }); },
+  expired: () => { playTone({ frequency: 523, duration: 0.2, volume: 0.2 }); setTimeout(() => playTone({ frequency: 415, duration: 0.2, volume: 0.2 }), 180); setTimeout(() => playTone({ frequency: 330, duration: 0.4, volume: 0.2 }), 360); },
 };
 
 // ─────────────────────────────────────────────
@@ -43,26 +58,26 @@ const vibesSounds = {
 // ─────────────────────────────────────────────
 function startSpeakingDetection(stream, onSpeaking) {
   try {
-    const ctx      = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     ctx.createMediaStreamSource(stream).connect(analyser);
-    const data     = new Uint8Array(analyser.frequencyBinCount);
+    const data = new Uint8Array(analyser.frequencyBinCount);
     const interval = setInterval(() => {
       analyser.getByteFrequencyData(data);
       onSpeaking(data.reduce((a, b) => a + b, 0) / data.length > 10);
     }, 100);
     return () => { clearInterval(interval); ctx.close(); };
-  } catch { return () => {}; }
+  } catch { return () => { }; }
 }
 
 // ─────────────────────────────────────────────
 // CONNECTION QUALITY
 // ─────────────────────────────────────────────
 function getQualityFromStats({ rtt, packetsLost, jitter }) {
-  if (rtt === null)                                        return 'unknown';
-  if (rtt < 100 && packetsLost < 2 && jitter < 20)        return 'good';
-  if (rtt < 250 && packetsLost < 8 && jitter < 50)        return 'fair';
+  if (rtt === null) return 'unknown';
+  if (rtt < 100 && packetsLost < 2 && jitter < 20) return 'good';
+  if (rtt < 250 && packetsLost < 8 && jitter < 50) return 'fair';
   return 'poor';
 }
 
@@ -72,42 +87,45 @@ async function measureConnectionQuality(peer, onQuality) {
     let rtt = null, packetsLost = 0, jitter = 0;
     stats.forEach(r => {
       if (r.type === 'remote-inbound-rtp') {
-        rtt         = r.roundTripTime ? r.roundTripTime * 1000 : null;
+        rtt = r.roundTripTime ? r.roundTripTime * 1000 : null;
         packetsLost = r.packetsLost ?? 0;
-        jitter      = r.jitter ? r.jitter * 1000 : 0;
+        jitter = r.jitter ? r.jitter * 1000 : 0;
       }
     });
     onQuality(getQualityFromStats({ rtt, packetsLost, jitter }));
-  } catch {}
+  } catch { }
 }
 
 // ─────────────────────────────────────────────
 // PROVIDER
 // ─────────────────────────────────────────────
 export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
-  const [localStream,       setLocalStream]       = useState(null);
-  const [remoteStreams,     setRemoteStreams]      = useState([]);
-  const [isMicOn,           setIsMicOn]           = useState(true);
-  const [isCamOn,           setIsCamOn]           = useState(true);
-  const [status,            setStatus]            = useState('idle');
-  const [error,             setError]             = useState(null);
-  const [remainingMs,       setRemainingMs]       = useState(null);
-  const [isSpeaking,        setIsSpeaking]        = useState(false);
-  const [remoteSpeaking,    setRemoteSpeaking]    = useState(false);
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStreams, setRemoteStreams] = useState([]);
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [isCamOn, setIsCamOn] = useState(true);
+  const [status, setStatus] = useState('idle');
+  const [error, setError] = useState(null);
+  const [remainingMs, setRemainingMs] = useState(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [remoteSpeaking, setRemoteSpeaking] = useState(false);
   const [connectionQuality, setConnectionQuality] = useState('unknown');
+  const [videoQuality, setVideoQualityState] = useState('720p');
 
-  const socketRef                = useRef(null);
-  const peersRef                 = useRef({});
-  const localStreamRef           = useRef(null);
-  const sessionRef               = useRef(null);
-  const remainingMsRef           = useRef(null);
-  const onExpiredRef             = useRef(null);
-  const vibesWarningFiredRef     = useRef(false);
-  const localSpeakingCleanupRef  = useRef(null);
+  const socketRef = useRef(null);
+  const peersRef = useRef({});
+  const localStreamRef = useRef(null);
+  const sessionRef = useRef(null);
+  const remainingMsRef = useRef(null);
+  const onExpiredRef = useRef(null);
+  const vibesWarningFiredRef = useRef(false);
+  const localSpeakingCleanupRef = useRef(null);
   const remoteSpeakingCleanupRef = useRef(null);
-  const qualityIntervalRef       = useRef(null);
+  const qualityIntervalRef = useRef(null);
+  const videoQualityRef = useRef('720p');
 
   useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
+  useEffect(() => { videoQualityRef.current = videoQuality; }, [videoQuality]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -125,6 +143,34 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
   const syncTimer = useCallback((ms) => {
     remainingMsRef.current = ms;
     setRemainingMs(ms);
+  }, []);
+
+  // ─────────────────────────────────────────────
+  // TROCA DE QUALIDADE EM TEMPO REAL
+  // ─────────────────────────────────────────────
+  const setVideoQuality = useCallback(async (preset) => {
+    if (!VIDEO_QUALITY_PRESETS[preset]) return;
+
+    const videoTrack = localStreamRef.current?.getVideoTracks()[0];
+    if (!videoTrack) return;
+
+    try {
+      await videoTrack.applyConstraints(VIDEO_QUALITY_PRESETS[preset]);
+      setVideoQualityState(preset);
+      videoQualityRef.current = preset;
+
+      // Atualiza o bitrate em todos os peers conectados
+      Object.values(peersRef.current).forEach(peer => {
+        const sender = peer.getSenders().find(s => s.track?.kind === 'video');
+        if (!sender) return;
+        const params = sender.getParameters();
+        if (!params.encodings?.length) params.encodings = [{}];
+        params.encodings[0].maxBitrate = VIDEO_QUALITY_BITRATE[preset];
+        sender.setParameters(params).catch(() => { });
+      });
+    } catch (err) {
+      console.warn('[PsiuFlash] applyConstraints falhou:', err);
+    }
   }, []);
 
   // ─────────────────────────────────────────────
@@ -171,10 +217,10 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
       socket.emit('answer', userId, answer);
     });
 
-    socket.on('answer',        async (userId, answer)    => { await peersRef.current[userId]?.setRemoteDescription(new RTCSessionDescription(answer)); });
-    socket.on('ice-candidate',       (userId, candidate) => { peersRef.current[userId]?.addIceCandidate(new RTCIceCandidate(candidate)); });
-    socket.on('timer-update',  ({ remainingMs })         => syncTimer(remainingMs));
-    socket.on('timer-paused',  ({ remainingMs })         => syncTimer(remainingMs));
+    socket.on('answer', async (userId, answer) => { await peersRef.current[userId]?.setRemoteDescription(new RTCSessionDescription(answer)); });
+    socket.on('ice-candidate', (userId, candidate) => { peersRef.current[userId]?.addIceCandidate(new RTCIceCandidate(candidate)); });
+    socket.on('timer-update', ({ remainingMs }) => syncTimer(remainingMs));
+    socket.on('timer-paused', ({ remainingMs }) => syncTimer(remainingMs));
 
     socket.on('timer-expired', () => {
       syncTimer(0);
@@ -183,8 +229,8 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
       onExpiredRef.current?.();
     });
 
-    socket.on('error',      (msg) => { setError(msg); setStatus('error'); });
-    socket.on('disconnect', ()    => { if (sessionRef.current) setStatus('reconnecting'); });
+    socket.on('error', (msg) => { setError(msg); setStatus('error'); });
+    socket.on('disconnect', () => { if (sessionRef.current) setStatus('reconnecting'); });
 
     return () => { socket.disconnect(); socketRef.current = null; };
   }, [serverUrl, syncTimer, vibes]);
@@ -197,6 +243,13 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
 
     peer.onconnectionstatechange = () => {
       if (peer.connectionState === 'connected') {
+        const sender = peer.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) {
+          const params = sender.getParameters();
+          if (!params.encodings?.length) params.encodings = [{}];
+          params.encodings[0].maxBitrate = VIDEO_QUALITY_BITRATE[videoQualityRef.current] ?? 2_500_000;
+          sender.setParameters(params).catch(() => { });
+        }
         qualityIntervalRef.current = setInterval(() => measureConnectionQuality(peer, setConnectionQuality), 3000);
       }
       if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
@@ -236,9 +289,9 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
   // ─────────────────────────────────────────────
   const waitForSocket = () => new Promise((resolve, reject) => {
     const socket = socketRef.current;
-    if (!socket)          return reject(new Error('Socket não inicializado'));
+    if (!socket) return reject(new Error('Socket não inicializado'));
     if (socket.connected) return resolve(socket);
-    socket.once('connect',       () => resolve(socket));
+    socket.once('connect', () => resolve(socket));
     socket.once('connect_error', () => reject(new Error('Falha ao conectar no servidor')));
   });
 
@@ -246,7 +299,19 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
     setStatus('connecting');
     setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+          facingMode: 'user',
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       localStreamRef.current = stream;
       setLocalStream(stream);
       localSpeakingCleanupRef.current?.();
@@ -257,10 +322,10 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
       let roomId = chave;
 
       if (papel === 'professor') {
-        const res  = await fetch(`${serverUrl}/api/rooms`, {
-          method:  'POST',
+        const res = await fetch(`${serverUrl}/api/rooms`, {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ maxParticipants, durationMinutes: tempo || 60, roomId: chave || undefined }),
+          body: JSON.stringify({ maxParticipants, durationMinutes: tempo || 60, roomId: chave || undefined }),
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -286,14 +351,14 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     Object.values(peersRef.current).forEach(p => p.close());
 
-    peersRef.current             = {};
-    sessionRef.current           = null;
-    onExpiredRef.current         = null;
+    peersRef.current = {};
+    sessionRef.current = null;
+    onExpiredRef.current = null;
     vibesWarningFiredRef.current = false;
 
     localSpeakingCleanupRef.current?.();
     remoteSpeakingCleanupRef.current?.();
-    localSpeakingCleanupRef.current  = null;
+    localSpeakingCleanupRef.current = null;
     remoteSpeakingCleanupRef.current = null;
     clearInterval(qualityIntervalRef.current);
     qualityIntervalRef.current = null;
@@ -308,16 +373,19 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
     setIsSpeaking(false);
     setRemoteSpeaking(false);
     setConnectionQuality('unknown');
+    setVideoQualityState('720p');
+    videoQualityRef.current = '720p';
   }, [syncTimer]);
 
-  const onExpired  = useCallback((fn) => { onExpiredRef.current = fn; }, []);
-  const toggleMic  = useCallback(() => { const t = localStream?.getAudioTracks()[0]; if (t) { t.enabled = !isMicOn; setIsMicOn(v => !v); } }, [localStream, isMicOn]);
-  const toggleCam  = useCallback(() => { const t = localStream?.getVideoTracks()[0]; if (t) { t.enabled = !isCamOn; setIsCamOn(v => !v); } }, [localStream, isCamOn]);
+  const onExpired = useCallback((fn) => { onExpiredRef.current = fn; }, []);
+  const toggleMic = useCallback(() => { const t = localStream?.getAudioTracks()[0]; if (t) { t.enabled = !isMicOn; setIsMicOn(v => !v); } }, [localStream, isMicOn]);
+  const toggleCam = useCallback(() => { const t = localStream?.getVideoTracks()[0]; if (t) { t.enabled = !isCamOn; setIsCamOn(v => !v); } }, [localStream, isCamOn]);
 
   return (
     <PsiuFlashContext.Provider value={{
       localStream, remoteStreams, isMicOn, isCamOn, status, error, remainingMs,
       isSpeaking, remoteSpeaking, connectionQuality,
+      videoQuality, setVideoQuality,
       connect, leaveRoom, toggleMic, toggleCam, onExpired,
     }}>
       {children}
@@ -326,35 +394,6 @@ export function PsiuFlashProvider({ children, serverUrl, vibes = false }) {
 }
 
 export const usePsiuFlash = () => useContext(PsiuFlashContext);
-
-// ─────────────────────────────────────────────
-// COMPONENTES DE VÍDEO
-// ─────────────────────────────────────────────
-
-export function LocalVideo({ style, className }) {
-  const { localStream } = usePsiuFlash();
-  const videoRef = useRef();
-  useEffect(() => { if (videoRef.current && localStream) videoRef.current.srcObject = localStream; }, [localStream]);
-  return <video ref={videoRef} autoPlay playsInline muted style={{ objectFit: 'cover', ...style }} className={className} />;
-}
-
-export function RemoteVideo({ stream: streamProp, muted = false, style, className, fallbackText = 'Aguardando...' }) {
-  const { remoteStreams } = usePsiuFlash();
-  const videoRef     = useRef();
-  const activeStream = streamProp ?? remoteStreams[0]?.stream ?? null;
-
-  useEffect(() => { if (videoRef.current && activeStream) videoRef.current.srcObject = activeStream; }, [activeStream]);
-
-  if (!activeStream) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1e293b', color: '#64748b', fontSize: 14, width: '100%', height: '100%', ...style }} className={className}>
-        {fallbackText}
-      </div>
-    );
-  }
-
-  return <video ref={videoRef} autoPlay playsInline muted={muted} style={{ objectFit: 'cover', ...style }} className={className} />;
-}
 
 export const formatTime = (ms) => {
   if (ms === null) return '--:--';

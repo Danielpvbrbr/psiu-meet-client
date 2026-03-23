@@ -6,71 +6,47 @@
 [![license](https://img.shields.io/npm/l/psiu-meet-client)](https://github.com/Danielpvbrbr/psiu-meet-client/blob/main/LICENSE)
 [![GitHub](https://img.shields.io/badge/github-Danielpvbrbr-black?logo=github)](https://github.com/Danielpvbrbr/psiu-meet-client)
 
-Toda a complexidade de sinalização, túneis ICE/STUN e troca de pacotes via Socket.io fica escondida. Para você, apenas **Hooks limpos** e **Componentes de Vídeo modulares** — sem layouts engessados, sem iframes. 100% customizável.
+Toda a complexidade de sinalização, túneis ICE/STUN e troca de pacotes fica escondida. Para você, apenas **Hooks limpos** e **Componentes de Vídeo modulares** — sem layouts engessados, sem iframes. 100% customizável.
 
 ---
 
 ## Índice
 
-- [Características](#características)
 - [Instalação](#instalação)
-- [Estrutura necessária](#estrutura-necessária)
+- [Pré-requisito: o servidor](#pré-requisito-o-servidor)
 - [Quick Start](#quick-start)
 - [API Reference](#api-reference)
-- [Uso Avançado](#uso-avançado)
-- [Backend — Servidor de Sinalização](#backend--servidor-de-sinalização)
+- [Exemplos de uso](#exemplos-de-uso)
 - [Notas Importantes](#notas-importantes)
 - [Licença](#licença)
 
 ---
 
-## Características
-
-| | |
-|---|---|
-| **Componentes prontos** | `<LocalVideo />` e `<RemoteVideo />` para montar o layout do seu jeito |
-| **Hook headless** | `usePsiuFlash()` expõe todas as funções e o estado da chamada |
-| **Tailwind Ready** | Todos os componentes aceitam `className` e `style` nativamente |
-| **StrictMode Safe** | Compatível com React StrictMode — sem conexões duplicadas |
-| **Reconexão automática** | Se o socket cair, reconecta e re-entra na sala automaticamente |
-| **Timer por consumo** | O tempo só é consumido quando os dois participantes estão conectados |
-| **Vibes** | Feedback sonoro opcional via Web Audio API — sem arquivos externos |
-| **Topologia Mesh** | Suporte nativo a chamadas 1:1 e expansível para grupos pequenos |
-
----
-
 ## Instalação
+
+Uma única dependência. Tudo que a lib precisa já vem junto.
 
 ```bash
 npm install psiu-meet-client
 ```
 
-### Dependências necessárias no seu projeto
-
-```bash
-npm install react react-dom socket.io-client
-```
+> A lib requer apenas `react` e `react-dom` — que você já tem no seu projeto.
 
 ---
 
-## Estrutura necessária
+## Pré-requisito: o servidor
 
-Antes de usar a biblioteca, você precisa ter um **servidor de sinalização** rodando. Veja a seção [Backend](#backend--servidor-de-sinalização) para o código completo.
+A `psiu-meet-client` é o **cliente React**. Para funcionar, ela precisa de um servidor de sinalização rodando. O código completo do servidor está disponível no repositório:
 
-```
-Seu App React
-    └── PsiuFlashProvider (serverUrl)
-            └── Conecta via Socket.io ao seu servidor
-                    └── Servidor faz o repasse WebRTC entre os clientes
-```
+👉 [github.com/Danielpvbrbr/psiu-meet-client](https://github.com/Danielpvbrbr/psiu-meet-client)
+
+Suba o servidor, anote a URL (ex: `https://sua-api.com`) e use-a no `serverUrl` do Provider.
 
 ---
 
 ## Quick Start
 
-### 1. Configure o Provider
-
-Envolva a rota ou tela de vídeo com `PsiuFlashProvider`, passando a URL do seu servidor.
+### Passo 1 — Envolva a tela de vídeo com o Provider
 
 ```jsx
 import { PsiuFlashProvider } from 'psiu-meet-client';
@@ -78,24 +54,18 @@ import SalaDeAula from './SalaDeAula';
 
 export default function App() {
   return (
-    <PsiuFlashProvider serverUrl="http://localhost:3333">
+    <PsiuFlashProvider serverUrl="https://sua-api.com">
       <SalaDeAula />
     </PsiuFlashProvider>
   );
 }
 ```
 
-Para ativar o feedback sonoro, passe a prop `vibes`:
-
-```jsx
-<PsiuFlashProvider serverUrl="http://localhost:3333" vibes>
-```
-
-> **Importante:** Monte o `PsiuFlashProvider` apenas na tela da videochamada, não no topo da aplicação inteira. Cada Provider abre uma conexão Socket independente.
+> Monte o `PsiuFlashProvider` **apenas na tela da videochamada**, não na raiz da aplicação. Cada Provider abre uma conexão independente com o servidor.
 
 ---
 
-### 2. Monte sua Sala de Vídeo
+### Passo 2 — Monte sua tela de vídeo
 
 ```jsx
 import { LocalVideo, RemoteVideo, usePsiuFlash, formatTime } from 'psiu-meet-client';
@@ -106,15 +76,16 @@ export default function SalaDeAula() {
     connect, leaveRoom, onExpired,
     toggleMic, toggleCam,
     isMicOn, isCamOn,
-    status, error, remainingMs
+    status, error, remainingMs,
   } = usePsiuFlash();
 
   const iniciouRef = useRef(false);
 
+  // Registre o onExpired ANTES de chamar o connect
   useEffect(() => {
     onExpired(() => {
       leaveRoom();
-      // redirecione o usuário aqui
+      // redirecione o usuário aqui, ex: navigate('/fim')
     });
   }, []);
 
@@ -122,37 +93,42 @@ export default function SalaDeAula() {
     if (iniciouRef.current) return;
     iniciouRef.current = true;
 
-    // Professor — cria a sala automaticamente
+    // Professor: cria a sala e recebe o roomId para passar ao aluno
     connect({ papel: 'professor', nome: 'Daniel', tempo: 60 })
-      .then(({ roomId }) => console.log('Sala criada:', roomId))
-      .catch(console.error);
+      .then(({ roomId }) => console.log('Compartilhe essa chave com o aluno:', roomId));
 
-    // Aluno — entra em uma sala existente
-    // connect({ papel: 'aluno', nome: 'Gabriel', chave: 'id-da-sala' })
+    // Aluno: entra em uma sala existente com a chave do professor
+    // connect({ papel: 'aluno', nome: 'Gabriel', chave: 'id-da-sala' });
   }, []);
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#0f1115', position: 'relative' }}>
 
-      <div style={{ position: 'absolute', top: 16, left: 16, color: '#fff', fontFamily: 'monospace' }}>
+      {/* Status e timer no canto superior esquerdo */}
+      <div style={{ position: 'absolute', top: 16, left: 16, color: '#fff', fontFamily: 'monospace', zIndex: 10 }}>
         <span>Status: {status}</span>
         <span style={{ marginLeft: 12 }}>⏱ {formatTime(remainingMs)}</span>
-        {error && <span style={{ marginLeft: 12, color: 'red' }}>{error}</span>}
+        {error && <span style={{ marginLeft: 12, color: '#f87171' }}>{error}</span>}
       </div>
 
+      {/* Vídeo do outro participante ocupa a tela toda */}
       <RemoteVideo
-        style={{ width: '100%', height: '100%' }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
         fallbackText="Aguardando o outro participante..."
       />
 
+      {/* Seu próprio vídeo no canto superior direito (PiP) */}
       <div style={{ position: 'absolute', top: 16, right: 16, width: 240, aspectRatio: '16/9', borderRadius: 12, overflow: 'hidden' }}>
         <LocalVideo style={{ width: '100%', height: '100%', transform: 'scaleX(-1)' }} />
       </div>
 
+      {/* Controles na parte inferior */}
       <div style={{ position: 'absolute', bottom: 32, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 12 }}>
-        <button onClick={toggleMic}>{isMicOn ? 'Mutar' : 'Ativar Mic'}</button>
-        <button onClick={toggleCam}>{isCamOn ? 'Desligar Cam' : 'Ligar Cam'}</button>
-        <button onClick={leaveRoom} style={{ background: 'red', color: '#fff' }}>Sair</button>
+        <button onClick={toggleMic}>{isMicOn ? '🎙 Mutar' : '🔇 Ativar Mic'}</button>
+        <button onClick={toggleCam}>{isCamOn ? '📷 Desligar Cam' : '📷 Ligar Cam'}</button>
+        <button onClick={leaveRoom} style={{ background: '#ef4444', color: '#fff', padding: '8px 20px', borderRadius: 8 }}>
+          Sair
+        </button>
       </div>
 
     </div>
@@ -166,58 +142,85 @@ export default function SalaDeAula() {
 
 ### `<PsiuFlashProvider />`
 
+O Provider conecta ao servidor e disponibiliza o contexto para todos os componentes filhos. Deve ser montado uma única vez por sessão de chamada.
+
 | Prop | Tipo | Padrão | Descrição |
 |---|---|---|---|
 | `serverUrl` | `String` | — | URL do servidor de sinalização |
-| `vibes` | `Boolean` | `false` | Ativa feedback sonoro via Web Audio API |
+| `vibes` | `Boolean` | `false` | Ativa sons de feedback via Web Audio API (entrada, saída, timer) |
+
+```jsx
+// Com feedback sonoro ativado
+<PsiuFlashProvider serverUrl="https://sua-api.com" vibes>
+  <SuaTela />
+</PsiuFlashProvider>
+```
 
 ---
 
 ### `usePsiuFlash()`
 
-Hook principal — deve ser usado dentro de um componente filho do `PsiuFlashProvider`.
+Hook principal — use dentro de qualquer componente filho do `PsiuFlashProvider`.
 
-| Método / Estado | Tipo | Descrição |
+#### Funções
+
+| Função | O que faz |
+|---|---|
+| `connect(payload)` | Liga a câmera e o microfone, depois entra ou cria a sala. Retorna `Promise<{ roomId }>` |
+| `leaveRoom()` | Para a câmera, fecha a conexão e limpa tudo. Não precisa de reload |
+| `onExpired(fn)` | Registra um callback que é chamado quando o tempo da sala acabar |
+| `toggleMic()` | Liga ou desliga o envio do áudio sem parar a câmera |
+| `toggleCam()` | Liga ou desliga o envio do vídeo sem parar o microfone |
+
+#### Estado
+
+| Estado | Tipo | Descrição |
 |---|---|---|
-| `connect(payload)` | `async Function` | Liga câmera, cria ou entra na sala. Retorna `{ roomId }` |
-| `leaveRoom()` | `Function` | Para câmera, fecha peers, limpa estado. Sem reload necessário |
-| `onExpired(fn)` | `Function` | Registra callback chamado quando o tempo da sala esgotar |
-| `toggleMic()` | `Function` | Ativa ou desativa o envio do seu áudio |
-| `toggleCam()` | `Function` | Ativa ou desativa o envio do seu vídeo |
+| `status` | `String` | Estado atual da chamada — veja os valores abaixo |
+| `error` | `String \| null` | Mensagem de erro quando `status === 'error'` |
+| `remainingMs` | `Number \| null` | Tempo restante em milissegundos. `null` enquanto não conectar |
 | `isMicOn` | `Boolean` | `true` se o microfone estiver ativo |
 | `isCamOn` | `Boolean` | `true` se a câmera estiver ativa |
-| `status` | `String` | `idle` \| `connecting` \| `connected` \| `reconnecting` \| `expired` \| `error` |
-| `error` | `String` | Mensagem do último erro — `null` se não houver |
-| `remainingMs` | `Number` | Tempo restante da sala em milissegundos — `null` até conectar |
-| `localStream` | `MediaStream` | Stream bruto da câmera/microfone do próprio usuário |
-| `remoteStreams` | `Array` | Lista dos participantes conectados: `[{ userId, stream }]` |
+| `isSpeaking` | `Boolean` | `true` se o usuário local estiver falando (detecção por volume) |
+| `remoteSpeaking` | `Boolean` | `true` se o participante remoto estiver falando |
+| `connectionQuality` | `String` | Qualidade da conexão: `'good'` \| `'fair'` \| `'poor'` \| `'unknown'` |
+| `localStream` | `MediaStream` | Stream bruto da câmera/microfone local — use para recursos customizados |
+| `remoteStreams` | `Array` | Lista de participantes: `[{ userId, stream }]` |
+
+#### Valores de `status`
+
+| Valor | Significado |
+|---|---|
+| `idle` | Aguardando `connect()` ser chamado |
+| `connecting` | Ligando câmera e entrando na sala |
+| `connected` | Na sala, tudo funcionando |
+| `reconnecting` | Socket caiu, tentando reconectar automaticamente |
+| `expired` | Tempo da sala esgotado |
+| `error` | Algo deu errado — veja `error` para detalhes |
 
 #### Payload do `connect()`
 
-| Campo | Tipo | Descrição |
-|---|---|---|
-| `papel` | `String` | `'professor'` cria a sala, `'aluno'` entra em uma existente |
-| `nome` | `String` | Nome do usuário — usado como `userId` |
-| `chave` | `String` | *(Opcional)* ID da sala — obrigatório para o aluno |
-| `tempo` | `Number` | *(Opcional)* Duração em minutos — padrão `60`, só para professor |
-
----
-
-### `formatTime(ms)`
-
-```js
-import { formatTime } from 'psiu-meet-client';
-
-formatTime(null)    // '--:--'
-formatTime(300000)  // '05:00'
-formatTime(90000)   // '01:30'
-```
+| Campo | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `papel` | `String` | ✅ | `'professor'` cria a sala. `'aluno'` entra em uma existente |
+| `nome` | `String` | ✅ | Nome do usuário — exibido para os outros participantes |
+| `chave` | `String` | Só para aluno | ID da sala para entrar |
+| `tempo` | `Number` | Só para professor | Duração em minutos. Padrão: `60` |
+| `id` | `String` | ❌ | ID customizado do usuário. Se não passar, usa `nome` |
+| `maxParticipants` | `Number` | ❌ | Máximo de participantes. Padrão: `2` |
 
 ---
 
 ### `<LocalVideo />`
 
-Renderiza a câmera do próprio usuário. Vem **mutado por padrão** para evitar eco de áudio.
+Renderiza a câmera do próprio usuário. Vem **mutado por padrão** para evitar eco.
+
+```jsx
+<LocalVideo
+  className="rounded-xl w-full h-full object-cover"
+  style={{ transform: 'scaleX(-1)' }} // espelha como selfie
+/>
+```
 
 | Prop | Tipo | Descrição |
 |---|---|---|
@@ -228,28 +231,87 @@ Renderiza a câmera do próprio usuário. Vem **mutado por padrão** para evitar
 
 ### `<RemoteVideo />`
 
+Renderiza o vídeo do participante remoto. Enquanto ele não estiver conectado, exibe o `fallbackText`.
+
+```jsx
+<RemoteVideo
+  className="w-full h-full object-cover"
+  fallbackText="Aguardando o professor..."
+/>
+```
+
 | Prop | Tipo | Padrão | Descrição |
 |---|---|---|---|
-| `stream` | `MediaStream` | — | *(Opcional)* Stream específico — útil para salas com múltiplos participantes |
-| `fallbackText` | `String` | `"Aguardando..."` | Texto exibido enquanto o vídeo remoto não chega |
+| `stream` | `MediaStream` | — | Stream específico — útil em salas com mais de 2 participantes |
+| `fallbackText` | `String` | `"Aguardando..."` | Texto exibido enquanto ninguém está conectado |
 | `muted` | `Boolean` | `false` | Muta o áudio remoto localmente |
 | `style` | `Object` | — | Estilos inline |
 | `className` | `String` | — | Classes CSS ou Tailwind |
 
 ---
 
-## Uso Avançado
+### `formatTime(ms)`
 
-### Reagir ao encerramento da sala
+Converte milissegundos em string `MM:SS`.
+
+```js
+import { formatTime } from 'psiu-meet-client';
+
+formatTime(null)    // '--:--'
+formatTime(300000)  // '05:00'
+formatTime(90000)   // '01:30'
+formatTime(0)       // '00:00'
+```
+
+---
+
+## Exemplos de uso
+
+### Alerta visual quando restar 5 minutos
 
 ```jsx
-useEffect(() => {
-  onExpired(() => {
-    leaveRoom();
-    navigate('/fim-da-aula');
-  });
-}, []);
+const { remainingMs } = usePsiuFlash();
+
+const timerColor = remainingMs !== null && remainingMs < 300000 ? '#f87171' : '#fff';
+
+<span style={{ color: timerColor, fontFamily: 'monospace', fontSize: 14 }}>
+  ⏱ {formatTime(remainingMs)}
+</span>
 ```
+
+---
+
+### Indicador de quem está falando
+
+```jsx
+const { isSpeaking, remoteSpeaking } = usePsiuFlash();
+
+// Adiciona uma borda verde ao vídeo de quem está falando
+<div style={{ border: isSpeaking ? '2px solid #4ade80' : '2px solid transparent' }}>
+  <LocalVideo style={{ width: '100%' }} />
+</div>
+
+<div style={{ border: remoteSpeaking ? '2px solid #4ade80' : '2px solid transparent' }}>
+  <RemoteVideo style={{ width: '100%' }} />
+</div>
+```
+
+---
+
+### Indicador de qualidade de conexão
+
+```jsx
+const { connectionQuality } = usePsiuFlash();
+
+const cores = { good: '#4ade80', fair: '#facc15', poor: '#f87171', unknown: '#64748b' };
+const labels = { good: 'Boa', fair: 'Regular', poor: 'Ruim', unknown: '...' };
+
+<span style={{ color: cores[connectionQuality], fontSize: 12 }}>
+  ● {labels[connectionQuality]}
+</span>
+```
+
+---
 
 ### Grid com múltiplos participantes
 
@@ -262,8 +324,11 @@ export function GridDeParticipantes() {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
       {remoteStreams.map(({ userId, stream }) => (
-        <div key={userId} style={{ position: 'relative', borderRadius: 8, overflow: 'hidden' }}>
-          <RemoteVideo stream={stream} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <div key={userId} style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', aspectRatio: '16/9' }}>
+          <RemoteVideo
+            stream={stream}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
           <span style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.5)', color: '#fff', padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
             {userId}
           </span>
@@ -274,81 +339,44 @@ export function GridDeParticipantes() {
 }
 ```
 
-### Countdown visual com alerta de 5 minutos
-
-```jsx
-const timerColor = remainingMs !== null && remainingMs < 300000 ? 'red' : 'white';
-
-<span style={{ color: timerColor, fontFamily: 'monospace' }}>
-  ⏱ {formatTime(remainingMs)}
-</span>
-```
-
 ---
 
-## Backend — Servidor de Sinalização
+### Redirecionar ao fim da aula
 
-A biblioteca foi projetada para funcionar com um servidor **Node.js + Socket.io + SQLite**. O tempo é controlado por consumo ativo — só é debitado quando os dois participantes estão conectados ao mesmo tempo.
+```jsx
+import { useNavigate } from 'react-router-dom';
 
-### Instalação
+const navigate = useNavigate();
+const { onExpired, leaveRoom } = usePsiuFlash();
 
-```bash
-npm install express socket.io cors better-sqlite3
+// Registre ANTES do connect()
+useEffect(() => {
+  onExpired(() => {
+    leaveRoom();
+    navigate('/fim-da-aula');
+  });
+}, []);
 ```
-
-### Eventos WebRTC
-
-| Evento | Direção | Payload | Descrição |
-|---|---|---|---|
-| `join-room` | Cliente → Servidor | `{ roomId, userId }` | Entra na sala |
-| `room-joined` | Servidor → Cliente | `{ roomId, userId, remainingMs }` | Confirmação com tempo restante |
-| `user-connected` | Servidor → Sala | `userId` | Outro participante entrou |
-| `user-disconnected` | Servidor → Sala | `userId` | Participante saiu |
-| `timer-update` | Servidor → Sala | `{ remainingMs }` | Sincronização do timer a cada 10s |
-| `timer-paused` | Servidor → Sala | `{ remainingMs }` | Timer pausado — menos de 2 participantes |
-| `timer-expired` | Servidor → Sala | — | Tempo esgotado — sala encerrada |
-| `offer` | Cliente → Cliente | `(toId, offer)` | Oferta WebRTC |
-| `answer` | Cliente → Cliente | `(toId, answer)` | Resposta WebRTC |
-| `ice-candidate` | Cliente → Cliente | `(toId, candidate)` | Candidatos ICE |
-| `error` | Servidor → Cliente | `mensagem string` | Sala inexistente, expirada, finalizada ou lotada |
-
-### Rotas REST
-
-| Método | Rota | Descrição |
-|---|---|---|
-| `POST` | `/api/rooms` | Cria uma sala. Body: `{ maxParticipants?, durationMinutes? }` |
-| `GET` | `/api/rooms/:roomId` | Tempo restante e participantes online |
-| `GET` | `/api/rooms/:roomId/history` | Histórico completo com entradas e saídas |
-| `GET` | `/api/history` | Histórico geral de todas as salas |
-| `GET` | `/dashboard` | Painel de monitoramento em HTML |
-
-> O código completo do servidor está disponível no repositório: [github.com/Danielpvbrbr/psiu-meet-client](https://github.com/Danielpvbrbr/psiu-meet-client)
 
 ---
 
 ## Notas Importantes
 
-**`connect()` substitui `startCamera()` + `joinRoom()`**
-Cuida de tudo em uma chamada: liga câmera, aguarda socket e entra na sala. Professor cria a sala automaticamente se não passar `chave`.
+**`connect()` faz tudo de uma vez**
+Liga câmera, aguarda o socket conectar e entra na sala. Não precisa chamar nenhuma outra função antes.
 
 **Registre `onExpired` antes de chamar `connect()`**
-
-```js
-useEffect(() => {
-  onExpired(() => { leaveRoom(); onSair(); });
-}, []);
-```
+Se você registrar depois, pode perder o evento caso a sala já tenha expirado.
 
 **`leaveRoom()` não precisa de reload**
-Para a câmera, fecha todos os peers e limpa o estado internamente.
-
-**Timer por consumo ativo**
-O tempo só é debitado quando os dois participantes estão conectados simultaneamente. Se a internet cair, o timer pausa e retoma quando reconectar.
+Para câmera, fecha todos os peers e limpa o estado. Chame `connect()` de novo para uma nova sessão.
 
 **Proteção contra dupla execução no StrictMode**
+O React StrictMode executa `useEffect` duas vezes no desenvolvimento. Use um ref para evitar conexões duplicadas:
 
 ```js
 const iniciouRef = useRef(false);
+
 useEffect(() => {
   if (iniciouRef.current) return;
   iniciouRef.current = true;
@@ -356,11 +384,11 @@ useEffect(() => {
 }, []);
 ```
 
-**Múltiplos Providers**
-Não monte mais de um `<PsiuFlashProvider>` ao mesmo tempo.
-
 **HTTPS em produção**
-Navegadores bloqueiam câmera e microfone em origens `http://` que não sejam `localhost`. Em produção, use `https://`.
+Navegadores bloqueiam acesso à câmera e microfone em origens `http://` que não sejam `localhost`. Em produção, sempre use `https://`.
+
+**Não monte mais de um Provider ao mesmo tempo**
+Cada `<PsiuFlashProvider>` abre uma conexão independente com o servidor.
 
 ---
 
